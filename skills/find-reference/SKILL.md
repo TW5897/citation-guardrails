@@ -9,7 +9,7 @@ description: >
   the user asks "what's the reference for", "find me a paper showing", "add a citation", "is there
   evidence that", or a reference came back NOT_FOUND from check-references. Use it before writing any
   citation into a draft, even when you think you remember the paper.
-allowed-tools: Bash(python ${CLAUDE_SKILL_DIR}/../check-references/scripts/citecheck.py *), Bash(python3 ${CLAUDE_SKILL_DIR}/../check-references/scripts/citecheck.py *), Bash(py -3 ${CLAUDE_SKILL_DIR}/../check-references/scripts/citecheck.py *), Read, Glob, Grep
+allowed-tools: Bash(python "${CLAUDE_SKILL_DIR}/../check-references/scripts/citecheck.py" *), Bash(python3 "${CLAUDE_SKILL_DIR}/../check-references/scripts/citecheck.py" *), Bash(py -3 "${CLAUDE_SKILL_DIR}/../check-references/scripts/citecheck.py" *), Read, Glob, Grep
 ---
 
 # find-reference
@@ -27,20 +27,21 @@ user to install `check-references` as well. On Windows use `python` or `py -3` i
 Quote any DOI that contains parentheses.
 
 ```bash
-C="${CLAUDE_SKILL_DIR}/../check-references/scripts/citecheck.py"
-python "$C" find "colchicine chronic coronary disease randomized" --max 5 --year-from 2019
-python "$C" find "..." --bib references/library.bib --pick 2      # write ONLY the chosen candidate as verified BibTeX
-python "$C" resolve "10.1056/NEJMoa2021372"                        # check an identifier the user supplied
-python "$C" resolve "The PRISMA 2020 statement: an updated guideline for reporting systematic reviews"
-python "$C" evidence --ids "10.1056/NEJMoa2021372" --out-dir qc    # abstract / open-access text for the chosen paper
+python "${CLAUDE_SKILL_DIR}/../check-references/scripts/citecheck.py" find "colchicine chronic coronary disease randomized" --max 5 --year-from 2019
+python "${CLAUDE_SKILL_DIR}/../check-references/scripts/citecheck.py" find "..." --bib references/library.bib --pick 2      # write ONLY the chosen candidate as verified BibTeX
+python "${CLAUDE_SKILL_DIR}/../check-references/scripts/citecheck.py" resolve "10.1056/NEJMoa2021372"                        # check an identifier the user supplied
+python "${CLAUDE_SKILL_DIR}/../check-references/scripts/citecheck.py" resolve "The PRISMA 2020 statement: an updated guideline for reporting systematic reviews"
+python "${CLAUDE_SKILL_DIR}/../check-references/scripts/citecheck.py" evidence --ids "10.1056/NEJMoa2021372" --out-dir qc    # abstract / open-access text for the chosen paper
 ```
 
-`find` runs a PubMed search (full PubMed syntax works: `"heart failure"[MeSH] AND colchicine[tiab]`)
+`find` runs a PubMed search (relevance-ranked) (full PubMed syntax works: `"heart failure"[MeSH] AND colchicine[tiab]`)
 and an OpenAlex search, de-duplicates, then puts every candidate through the same multi-source
 verification as `check-references`. The output has three lists: **verified** candidates (confirmed
 by two or more databases, not retracted), **single-source** candidates (seen in one database only;
 not verified), and **retracted** papers that matched the query (excluded). Only verified candidates
-can be written to `--bib`.
+can be written to `--bib`, and an entry whose DOI/PMID is already in the file is not duplicated.
+`evidence --ids` writes its one-off audit to `qc/evidence/ids_audit.json` and merges into the evidence
+index; it never touches the manuscript's `qc/reference_audit.json`.
 
 ## Procedure
 

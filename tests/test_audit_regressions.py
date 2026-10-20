@@ -136,11 +136,16 @@ class AuditAdditions(unittest.TestCase):
             m.assert_called_once()
             self.assertEqual(res.status, "RETRACTED")
             self.assertEqual(res.sources_confirming, ["openalex", "pubmed"])
-        with self.subTest("journal / volume / first-page differences are warnings"):
+        with self.subTest("a journal difference alone is a warning"):
+            res = FakeVerifier(doi_hits=[hit("crossref", **LODOCO)]).verify(
+                ref(title=LODOCO["title"], first_author="Nidorf", year="2020", journal="JAMA", doi="10.1056/nejmoa2021372"))
+            self.assertEqual(res.status, "VERIFIED_WITH_WARNINGS")
+            self.assertEqual(sum(1 for c in res.checks if c.outcome == "warning"), 1)
+        with self.subTest("volume AND first page both different means a different work (second-round audit)"):
             res = FakeVerifier(doi_hits=[hit("crossref", **LODOCO)]).verify(
                 ref(title=LODOCO["title"], first_author="Nidorf", year="2020", journal="JAMA", volume="384", pages="1900-1910", doi="10.1056/nejmoa2021372"))
-            self.assertEqual(res.status, "VERIFIED_WITH_WARNINGS")
-            self.assertEqual(sum(1 for c in res.checks if c.outcome == "warning"), 3)
+            self.assertEqual(res.status, "MISMATCH")
+            self.assertIn("DIFFERENT_WORK", res.flags)
         with self.subTest("dead DOI, but the title exists elsewhere"):
             nf = [cc.Hit(source="crossref", query="doi:x", ok=True, found=False)]
             cand = {"source": "openalex", "doi": "10.1056/nejmoa2021372", "pmid": "", "title": LODOCO["title"], "first_author": "Nidorf", "year": "2020", "journal": "NEJM"}

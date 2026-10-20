@@ -10,7 +10,7 @@ description: >
   AI-assisted drafting or revision, when a reviewer or co-author questions a statement, or whenever
   the user asks "does the source support this", "fact-check my draft", "are these claims right",
   or mentions misquoted, misattributed or over-stated citations.
-allowed-tools: Bash(python ${CLAUDE_SKILL_DIR}/../check-references/scripts/citecheck.py *), Bash(python3 ${CLAUDE_SKILL_DIR}/../check-references/scripts/citecheck.py *), Bash(py -3 ${CLAUDE_SKILL_DIR}/../check-references/scripts/citecheck.py *), Read, Glob, Grep
+allowed-tools: Bash(python "${CLAUDE_SKILL_DIR}/../check-references/scripts/citecheck.py" *), Bash(python3 "${CLAUDE_SKILL_DIR}/../check-references/scripts/citecheck.py" *), Bash(py -3 "${CLAUDE_SKILL_DIR}/../check-references/scripts/citecheck.py" *), Read, Glob, Grep
 ---
 
 # check-claims

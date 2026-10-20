@@ -4,8 +4,19 @@
 
 First public release. Before release the tool went through a seven-lens adversarial audit (code
 correctness, live misclassification hunt with 31 crafted citations, documentation accuracy, skill
-quality, a clinician's first run on Windows, privacy, test coverage); every confirmed finding is fixed
-here and covered by a regression test or a live `selftest` fixture.
+quality, a clinician's first run on Windows, privacy, test coverage) and a second, independently
+verified round on the fixed code (adversarial re-hunt with 30+ new cases, docs-vs-behaviour, a
+clinician's first run in PowerShell); every confirmed finding is fixed here and covered by a
+regression test or a live `selftest` fixture.
+
+Second-round fixes: one-item and Lancet-style (`1 Author`, `1<TAB>Author`) lists; Word line breaks,
+tabs and endnotes; curly apostrophes and dotted initials in surnames; non-English titles (PubMed
+vernacular titles); book chapters (`In:`), Harvard/MLA quoted titles, NLM group authors after a
+semicolon; sibling-paper Frankensteins (`DIFFERENT_WORK`); cited PMCIDs and second PMIDs resolved and
+cross-checked; DOIs wrapped across lines; `evidence --ids` no longer overwrites the manuscript audit;
+manuscript prose can no longer leak via a bare `Sources` heading or numbered body lists; `find`
+ranks by relevance, shows every verified hit and never duplicates `.bib` entries; shell-split DOIs
+are re-joined; unchecked rows are reported by cause; skill `allowed-tools` rules match the commands.
 
 - `check-references` skill and `citecheck.py` engine: multi-source verification (CrossRef, doi.org
   registry check without following redirects, PubMed incl. Bookshelf records, OpenAlex, Europe PMC,

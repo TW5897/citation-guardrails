@@ -11,7 +11,7 @@ description: >
   refs", or is about to submit, circulate or post a manuscript, abstract, protocol, thesis, editorial or
   review that cites literature, even if they do not ask for a formal audit. Always run it after any
   AI-assisted drafting or revision touched references.
-allowed-tools: Bash(python ${CLAUDE_SKILL_DIR}/scripts/citecheck.py *), Bash(python3 ${CLAUDE_SKILL_DIR}/scripts/citecheck.py *), Bash(py -3 ${CLAUDE_SKILL_DIR}/scripts/citecheck.py *), Read, Glob, Grep
+allowed-tools: Bash(python "${CLAUDE_SKILL_DIR}/scripts/citecheck.py" *), Bash(python3 "${CLAUDE_SKILL_DIR}/scripts/citecheck.py" *), Bash(py -3 "${CLAUDE_SKILL_DIR}/scripts/citecheck.py" *), Read, Glob, Grep
 ---
 
 # check-references
@@ -71,16 +71,18 @@ error; 3 no references detected; 4 nothing blocking but some rows could not be c
    3. `VERIFIED_WITH_WARNINGS` rows: the paper exists; a field needs fixing, or something could not be
       compared (`AUTHOR_NOT_CHECKED`, `FIELDS_NOT_CHECKED`, `SINGLE_SOURCE_CONFLICT`).
    4. Flags needing a human look: `PREPRINT`, `MULTIPLE_MATCHES`, `TITLE_MATCHED`, `RETRACTION_HINT`,
-      `MULTIPLE_DOIS`, `PMCID_MISMATCH`.
+      `MULTIPLE_DOIS`, `BOOK_CHAPTER`.
    5. Counts, `checked`/`unchecked`, and the `submission_safe` value. `submission_safe` is true only
       when every reference was checked and none is blocking.
-4. **Propose fixes, from the source record only.** The audit gives a ready Vancouver string in
-   `resolved`.
+4. **Propose fixes, from the source record only.** Each record in the audit JSON carries the source
+   record's fields in `resolved` and a ready-made Vancouver string in `vancouver`.
    - `MISMATCH`: replace the wrong field(s) with the source record's; say which field was wrong.
    - `MISMATCH` + `NOTICE_DOI_CITED`: the DOI belongs to an erratum/correction notice; cite the
      original article (the note gives its DOI when CrossRef knows it).
-   - `MISMATCH` + `IDENTIFIER_CONFLICT`: DOI and PMID belong to different papers; keep the one that
-     matches the cited title and drop the other.
+   - `MISMATCH` + `IDENTIFIER_CONFLICT` / `PMCID_MISMATCH` / `MULTIPLE_PMIDS`: the identifiers in the item
+     belong to different papers; keep the one that matches the cited title and drop the others.
+   - `MISMATCH` + `DIFFERENT_WORK`: several fields (title wording, year, volume, first page) point to a sibling
+     paper; the DOI/PMID is the wrong one of two related papers. Resolve from the cited title.
    - `NOT_FOUND` + `IDENTIFIER_WRONG_BUT_TITLE_EXISTS`: **the paper is real** but the cited DOI/PMID
      is wrong; use the identifier in the note and re-run. Never call this reference fabricated.
    - `NOT_FOUND` + `TITLE_EXISTS_AUTHOR_YEAR_DIFFER`: a paper with this title exists but the cited
@@ -90,7 +92,8 @@ error; 3 no references detected; 4 nothing blocking but some rows could not be c
      paper without the user confirming it supports the claim.
    - `RETRACTED`: recommend removal, or citing it only as a retracted paper with the retraction notice.
    - `UNVERIFIABLE` + `WEB_RESOURCE`: a web page or organisation document; ask the user to confirm the
-     URL opens and says what is claimed. `DOI_RESOLVES_NO_METADATA`: open the DOI and compare by hand.
+     URL opens and says what is claimed. `LAYOUT_NOT_RECOGNISED`: the citation style could not be parsed
+     (unusual Harvard/MLA variants, odd punctuation); ask for a DOI/PMID or a Vancouver/APA version. `DOI_RESOLVES_NO_METADATA`: open the DOI and compare by hand.
      `TITLE_ONLY_UNCONFIRMED`: the title exists but no author/year was cited; add the DOI.
    - `PREPRINT`: say so; with `PUBLISHED_VERSION_EXISTS`, offer the published DOI.
    - `MULTIPLE_MATCHES`: several works share the title (co-publications); add the DOI or PMID.

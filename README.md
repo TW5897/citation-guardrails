@@ -63,9 +63,9 @@ curl -O https://raw.githubusercontent.com/TW5897/citation-guardrails/main/skills
 python citecheck.py verify my_references.bib --out-dir qc
 ```
 
-Requirements: Python 3.10 or newer and internet access. Nothing to `pip install`. On Windows, `python3`
-is often a Microsoft Store stub that prints "Python was not found"; use `python` or `py -3`, and in
-PowerShell use `curl.exe` rather than `curl`.
+Requirements: Python 3.10 or newer and internet access. Nothing to `pip install`. On Windows, if
+`python` or `python3` prints "Python was not found" (the Microsoft Store stub), use `py -3`, the Windows
+launcher. In PowerShell use `curl.exe` rather than `curl`.
 
 Optional environment variables: `CITECHECK_EMAIL=you@example.org` puts you in CrossRef's polite pool
 (and is passed to NCBI and OpenAlex as the contact they ask for); `NCBI_API_KEY` raises the PubMed rate
@@ -127,14 +127,15 @@ Paste `docs/claude-md-snippet.md` into your `CLAUDE.md` to make the rules standi
 ## Use it from the terminal
 
 ```bash
-C=skills/check-references/scripts/citecheck.py                 # PowerShell: $C = "skills\check-references\scripts\citecheck.py"
+C="$PWD/skills/check-references/scripts/citecheck.py"          # PowerShell: $C = (Resolve-Path "skills\check-references\scripts\citecheck.py").Path
+                                                                # (absolute, so the commands also work from your manuscript folder)
 
 python $C verify examples/manuscript-audit/manuscript.md --out-dir qc      # .md .qmd .txt .docx .bib .ris .tex .json .csv .tsv
 python $C verify refs.bib --strict                                         # exit 1 unless every reference is VERIFIED
-python $C verify --ids "10.1056/NEJMoa2021372" 32865380 "The PRISMA 2020 statement: an updated guideline for reporting systematic reviews"
+python $C verify --ids "10.1056/NEJMoa2021372" 32865380 "Page MJ, et al. The PRISMA 2020 statement: an updated guideline for reporting systematic reviews. BMJ. 2021."   # a bare title with no author/year cannot be confirmed
 python $C resolve "10.1016/S0140-6736(20)31180-6"                          # one identifier -> status, flags, consensus record (quote DOIs with parentheses)
-python $C find "colchicine chronic coronary disease randomized" --year-from 2019 --bib references/library.bib --pick 1
-python $C claims manuscript.md --out-dir qc                                # every sentence that carries a citation, as a checklist
+python $C find "LoDoCo2 colchicine chronic coronary disease" --year-from 2019        # look first; then add --bib references/library.bib --pick N for the one you checked
+python $C claims examples/manuscript-audit/manuscript.md --out-dir qc      # every sentence that carries a citation, as a checklist
 python $C evidence qc/reference_audit.json --out-dir qc                    # abstracts / open-access full text for claim checking
 ```
 
@@ -175,22 +176,24 @@ usage error, `3` no references detected, `4` nothing blocking but some reference
 `submission_safe` is true only when every reference was checked and none is blocking. Other flags:
 `PREPRINT`, `PUBLISHED_VERSION_EXISTS`, `EXPRESSION_OF_CONCERN`, `CORRECTION_PUBLISHED`, `TITLE_MATCHED`
 (matched by title plus the cited author or year), `MULTIPLE_MATCHES` (co-publications share the title;
-add the DOI), `MULTIPLE_DOIS`, `PMCID_MISMATCH`, `RETRACTION_HINT`, `SINGLE_SOURCE_CONFLICT`.
+add the DOI), `MULTIPLE_DOIS`, `MULTIPLE_PMIDS`, `PMCID_MISMATCH`, `DIFFERENT_WORK`, `BOOK_CHAPTER`, `LAYOUT_NOT_RECOGNISED`, `RETRACTION_HINT`, `SINGLE_SOURCE_CONFLICT`.
 `confidence: high` means two or more independent databases returned the record.
 
 ## How it checks
 
-1. Parse the reference (BibTeX, RIS, Vancouver/AMA, APA, pandoc, DOCX including Word auto-numbering,
-   LaTeX `\bibitem`, JSON/CSL-JSON, CSV). UTF-8, UTF-16 and Windows-1252 files are read; PDFs are refused
+1. Parse the reference (BibTeX, RIS, Vancouver/AMA, APA, Harvard/MLA quoted titles, book chapters, pandoc,
+   DOCX including Word auto-numbering, Shift+Enter line breaks and endnotes, Lancet-style numbering, LaTeX
+   `\bibitem`, JSON/CSL-JSON, CSV). UTF-8, UTF-16 and Windows-1252 files are read; PDFs are refused
    with instructions.
 2. Resolve identifiers: CrossRef, DataCite (Zenodo, arXiv, datasets) and the doi.org registry for the DOI;
    PubMed (including Bookshelf) for the PMID; OpenAlex and Europe PMC for both. A DOI-only citation is
    enriched with its PubMed record via the PMID the other databases report. A DOI that doi.org, CrossRef
    and DataCite do not know is NOT_FOUND even if a secondary index has a stray record for it.
 3. Check that the DOI record and the PMID record are the same work, and that a cited PMCID belongs to it.
-4. Compare the cited title (fuzzy, subtitle-tolerant), first-author surname (particle-, hyphen-, suffix- and
-   accent-tolerant), year, journal (abbreviation-aware; sister journals do not match), volume and first
-   page against every record found. **Nothing is VERIFIED unless at least one record with metadata was
+4. Compare the cited title (fuzzy, subtitle-tolerant, vernacular titles for non-English papers), first-author
+   surname (particle-, hyphen-, suffix-, apostrophe- and accent-tolerant), year, journal (abbreviation-aware;
+   sister journals do not match), volume and first page against every record found; several small
+   disagreements together mean a sibling paper's identifier (`DIFFERENT_WORK`). **Nothing is VERIFIED unless at least one record with metadata was
    compared**; a bare doi.org redirect is UNVERIFIABLE.
 5. Collect retraction signals from CrossRef `updated-by` (including Retraction Watch entries), OpenAlex
    `is_retracted`, PubMed `Retracted Publication` / `RetractionIn` and Europe PMC; detect erratum and

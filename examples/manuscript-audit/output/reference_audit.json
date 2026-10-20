@@ -1,7 +1,7 @@
 {
   "tool": "citecheck",
   "version": "0.1.0",
-  "generated": "2026-10-20T12:55:55Z",
+  "generated": "2026-10-20T13:39:34Z",
   "source": "examples\\manuscript-audit\\manuscript.md",
   "sources_queried": [
     "crossref",
@@ -161,6 +161,7 @@
           "pubmed"
         ]
       },
+      "vancouver": "Nidorf SM, Fiolet ATL, Mosterd A, Eikelboom JW, Schut A, Opstal TSJ, et al. Colchicine in Patients with Chronic Coronary Disease. N Engl J Med. 2020;383(19):1838-1847. doi:10.1056/nejmoa2021372 PMID: 32865380",
       "checks": [
         {
           "field": "title",
@@ -205,6 +206,7 @@
           "error": "",
           "title": "Colchicine in Patients with Chronic Coronary Disease",
           "subtitle": "",
+          "alt_titles": [],
           "authors": [
             "Nidorf",
             "Fiolet",
@@ -297,7 +299,7 @@
           "notice_for": "",
           "weak_retraction": false,
           "licence": "",
-          "retrieved": "2026-10-20T12:55:45Z",
+          "retrieved": "2026-10-20T13:39:25Z",
           "candidates": []
         },
         {
@@ -309,6 +311,7 @@
           "error": "",
           "title": "",
           "subtitle": "",
+          "alt_titles": [],
           "authors": [],
           "authors_full": [],
           "first_author": "",
@@ -333,7 +336,7 @@
           "notice_for": "",
           "weak_retraction": false,
           "licence": "",
-          "retrieved": "2026-10-20T12:55:46Z",
+          "retrieved": "2026-10-20T13:39:25Z",
           "candidates": []
         },
         {
@@ -345,6 +348,7 @@
           "error": "",
           "title": "Colchicine in Patients with Chronic Coronary Disease",
           "subtitle": "",
+          "alt_titles": [],
           "authors": [
             "Nidorf",
             "Fiolet",
@@ -437,7 +441,7 @@
           "notice_for": "",
           "weak_retraction": false,
           "licence": "",
-          "retrieved": "2026-10-20T12:55:46Z",
+          "retrieved": "2026-10-20T13:39:25Z",
           "candidates": []
         },
         {
@@ -449,6 +453,7 @@
           "error": "",
           "title": "Colchicine in Patients with Chronic Coronary Disease.",
           "subtitle": "",
+          "alt_titles": [],
           "authors": [
             "Nidorf"
           ],
@@ -475,7 +480,7 @@
           "notice_for": "",
           "weak_retraction": false,
           "licence": "",
-          "retrieved": "2026-10-20T12:55:46Z",
+          "retrieved": "2026-10-20T13:39:26Z",
           "candidates": [
             {
               "source": "europepmc",
@@ -503,6 +508,7 @@
           "error": "",
           "title": "Colchicine in Patients with Chronic Coronary Disease.",
           "subtitle": "",
+          "alt_titles": [],
           "authors": [
             "Nidorf",
             "Fiolet",
@@ -595,7 +601,7 @@
           "notice_for": "",
           "weak_retraction": false,
           "licence": "",
-          "retrieved": "2026-10-20T12:55:47Z",
+          "retrieved": "2026-10-20T13:39:26Z",
           "candidates": []
         }
       ]
@@ -709,6 +715,7 @@
           "pubmed"
         ]
       },
+      "vancouver": "Tardif JC, Kouz S, Waters DD, Bertrand OF, Diaz R, Maggioni AP, et al. Efficacy and Safety of Low-Dose Colchicine after Myocardial Infarction. N Engl J Med. 2019;381(26):2497-2505. doi:10.1056/nejmoa1912388 PMID: 31733140",
       "checks": [
         {
           "field": "title",
@@ -753,6 +760,7 @@
           "error": "",
           "title": "Efficacy and Safety of Low-Dose Colchicine after Myocardial Infarction",
           "subtitle": "",
+          "alt_titles": [],
           "authors": [
             "Tardif",
             "Kouz",
@@ -829,7 +837,7 @@
           "notice_for": "",
           "weak_retraction": false,
           "licence": "",
-          "retrieved": "2026-10-20T12:55:47Z",
+          "retrieved": "2026-10-20T13:39:26Z",
           "candidates": []
         },
         {
@@ -841,6 +849,7 @@
           "error": "",
           "title": "",
           "subtitle": "",
+          "alt_titles": [],
           "authors": [],
           "authors_full": [],
           "first_author": "",
@@ -865,7 +874,7 @@
           "notice_for": "",
           "weak_retraction": false,
           "licence": "",
-          "retrieved": "2026-10-20T12:55:48Z",
+          "retrieved": "2026-10-20T13:39:27Z",
           "candidates": []
         },
         {
@@ -877,6 +886,7 @@
           "error": "",
           "title": "Efficacy and Safety of Low-Dose Colchicine after Myocardial Infarction",
           "subtitle": "",
+          "alt_titles": [],
           "authors": [
             "Tardif",
             "Kouz",
@@ -953,7 +963,7 @@
           "notice_for": "",
           "weak_retraction": false,
           "licence": "",
-          "retrieved": "2026-10-20T12:55:48Z",
+          "retrieved": "2026-10-20T13:39:27Z",
           "candidates": []
         },
         {
@@ -965,6 +975,7 @@
           "error": "",
           "title": "Efficacy and Safety of Low-Dose Colchicine after Myocardial Infarction.",
           "subtitle": "",
+          "alt_titles": [],
           "authors": [
             "Tardif"
           ],
@@ -991,7 +1002,7 @@
           "notice_for": "",
           "weak_retraction": false,
           "licence": "",
-          "retrieved": "2026-10-20T12:55:48Z",
+          "retrieved": "2026-10-20T13:39:28Z",
           "candidates": [
             {
               "source": "europepmc",
@@ -1019,6 +1030,7 @@
           "error": "",
           "title": "Efficacy and Safety of Low-Dose Colchicine after Myocardial Infarction.",
           "subtitle": "",
+          "alt_titles": [],
           "authors": [
             "Tardif",
             "Kouz",
@@ -1095,7 +1107,7 @@
           "notice_for": "",
           "weak_retraction": false,
           "licence": "",
-          "retrieved": "2026-10-20T12:55:49Z",
+          "retrieved": "2026-10-20T13:39:28Z",
           "candidates": []
         }
       ]
@@ -1185,6 +1197,7 @@
           "pubmed"
         ]
       },
+      "vancouver": "Warsi T, Ramphul K, Dulay MS, Jeelani S, Verma R, Kumar N, et al. Risk Factors of Acute Ischemic Stroke and Mortality Among Adults With Endocardial Fibroelastosis. Neurologist. 2024;29(6):317-322. doi:10.1097/nrl.0000000000000576 PMID: 39034931",
       "checks": [
         {
           "field": "title",
@@ -1229,6 +1242,7 @@
           "error": "",
           "title": "Risk Factors of Acute Ischemic Stroke and Mortality Among Adults With Endocardial Fibroelastosis.",
           "subtitle": "",
+          "alt_titles": [],
           "authors": [
             "Warsi",
             "Ramphul",
@@ -1283,7 +1297,7 @@
           "notice_for": "",
           "weak_retraction": false,
           "licence": "",
-          "retrieved": "2026-10-20T12:55:49Z",
+          "retrieved": "2026-10-20T13:39:29Z",
           "candidates": []
         },
         {
@@ -1295,6 +1309,7 @@
           "error": "",
           "title": "Risk Factors of Acute Ischemic Stroke and Mortality Among Adults With Endocardial Fibroelastosis.",
           "subtitle": "",
+          "alt_titles": [],
           "authors": [
             "Warsi"
           ],
@@ -1321,7 +1336,7 @@
           "notice_for": "",
           "weak_retraction": false,
           "licence": "",
-          "retrieved": "2026-10-20T12:55:49Z",
+          "retrieved": "2026-10-20T13:39:29Z",
           "candidates": [
             {
               "source": "europepmc",
@@ -1349,6 +1364,7 @@
           "error": "",
           "title": "Risk Factors of Acute Ischemic Stroke and Mortality Among Adults With Endocardial Fibroelastosis",
           "subtitle": "",
+          "alt_titles": [],
           "authors": [
             "Warsi",
             "Ramphul",
@@ -1403,7 +1419,7 @@
           "notice_for": "",
           "weak_retraction": false,
           "licence": "",
-          "retrieved": "2026-10-20T12:55:50Z",
+          "retrieved": "2026-10-20T13:39:29Z",
           "candidates": []
         }
       ]
@@ -1494,6 +1510,7 @@
           "pubmed"
         ]
       },
+      "vancouver": "Mehra MR, Desai SS, Ruschitzka F, Patel AN. RETRACTED: Hydroxychloroquine or chloroquine with or without a macrolide for treatment of COVID-19: a multinational registry analysis. Lancet. 2020;395(10240):1820-1820. doi:10.1016/s0140-6736(20)31180-6 PMID: 32450107",
       "checks": [
         {
           "field": "title",
@@ -1538,6 +1555,7 @@
           "error": "",
           "title": "RETRACTED: Hydroxychloroquine or chloroquine with or without a macrolide for treatment of COVID-19: a multinational registry analysis",
           "subtitle": "",
+          "alt_titles": [],
           "authors": [
             "Mehra",
             "Desai",
@@ -1581,7 +1599,7 @@
           "notice_for": "",
           "weak_retraction": false,
           "licence": "",
-          "retrieved": "2026-10-20T12:55:50Z",
+          "retrieved": "2026-10-20T13:39:29Z",
           "candidates": []
         },
         {
@@ -1593,6 +1611,7 @@
           "error": "",
           "title": "",
           "subtitle": "",
+          "alt_titles": [],
           "authors": [],
           "authors_full": [],
           "first_author": "",
@@ -1617,7 +1636,7 @@
           "notice_for": "",
           "weak_retraction": false,
           "licence": "",
-          "retrieved": "2026-10-20T12:55:50Z",
+          "retrieved": "2026-10-20T13:39:30Z",
           "candidates": []
         },
         {
@@ -1629,6 +1648,7 @@
           "error": "",
           "title": "RETRACTED: Hydroxychloroquine or chloroquine with or without a macrolide for treatment of COVID-19: a multinational registry analysis",
           "subtitle": "",
+          "alt_titles": [],
           "authors": [
             "Mehra",
             "Desai",
@@ -1665,7 +1685,7 @@
           "notice_for": "",
           "weak_retraction": false,
           "licence": "",
-          "retrieved": "2026-10-20T12:55:51Z",
+          "retrieved": "2026-10-20T13:39:30Z",
           "candidates": []
         },
         {
@@ -1677,6 +1697,7 @@
           "error": "",
           "title": "RETRACTED: Hydroxychloroquine or chloroquine with or without a macrolide for treatment of COVID-19: a multinational registry analysis.",
           "subtitle": "",
+          "alt_titles": [],
           "authors": [
             "Mehra"
           ],
@@ -1703,7 +1724,7 @@
           "notice_for": "",
           "weak_retraction": false,
           "licence": "",
-          "retrieved": "2026-10-20T12:55:51Z",
+          "retrieved": "2026-10-20T13:39:30Z",
           "candidates": [
             {
               "source": "europepmc",
@@ -1731,6 +1752,7 @@
           "error": "",
           "title": "RETRACTED: Hydroxychloroquine or chloroquine with or without a macrolide for treatment of COVID-19: a multinational registry analysis.",
           "subtitle": "",
+          "alt_titles": [],
           "authors": [
             "Mehra",
             "Desai",
@@ -1771,7 +1793,7 @@
           "notice_for": "",
           "weak_retraction": false,
           "licence": "",
-          "retrieved": "2026-10-20T12:55:51Z",
+          "retrieved": "2026-10-20T13:39:31Z",
           "candidates": []
         }
       ]
@@ -1886,6 +1908,7 @@
           "pubmed"
         ]
       },
+      "vancouver": "Page MJ, McKenzie JE, Bossuyt PM, Boutron I, Hoffmann TC, Mulrow CD, et al. The PRISMA 2020 statement: an updated guideline for reporting systematic reviews. BMJ. 2021;372:n71. doi:10.1136/bmj.n71 PMID: 33782057",
       "checks": [
         {
           "field": "title",
@@ -1930,6 +1953,7 @@
           "error": "",
           "title": "The PRISMA 2020 statement: an updated guideline for reporting systematic reviews",
           "subtitle": "",
+          "alt_titles": [],
           "authors": [
             "Page",
             "McKenzie",
@@ -2008,7 +2032,7 @@
           "notice_for": "",
           "weak_retraction": false,
           "licence": "",
-          "retrieved": "2026-10-20T12:55:52Z",
+          "retrieved": "2026-10-20T13:39:31Z",
           "candidates": []
         },
         {
@@ -2020,6 +2044,7 @@
           "error": "",
           "title": "",
           "subtitle": "",
+          "alt_titles": [],
           "authors": [],
           "authors_full": [],
           "first_author": "",
@@ -2044,7 +2069,7 @@
           "notice_for": "",
           "weak_retraction": false,
           "licence": "",
-          "retrieved": "2026-10-20T12:55:52Z",
+          "retrieved": "2026-10-20T13:39:31Z",
           "candidates": []
         },
         {
@@ -2056,6 +2081,7 @@
           "error": "",
           "title": "The PRISMA 2020 statement: an updated guideline for reporting systematic reviews",
           "subtitle": "",
+          "alt_titles": [],
           "authors": [
             "Page",
             "McKenzie",
@@ -2134,7 +2160,7 @@
           "notice_for": "",
           "weak_retraction": false,
           "licence": "",
-          "retrieved": "2026-10-20T12:55:52Z",
+          "retrieved": "2026-10-20T13:39:32Z",
           "candidates": []
         },
         {
@@ -2146,6 +2172,7 @@
           "error": "",
           "title": "The PRISMA 2020 statement: an updated guideline for reporting systematic reviews.",
           "subtitle": "",
+          "alt_titles": [],
           "authors": [
             "Page"
           ],
@@ -2172,7 +2199,7 @@
           "notice_for": "",
           "weak_retraction": false,
           "licence": "",
-          "retrieved": "2026-10-20T12:55:53Z",
+          "retrieved": "2026-10-20T13:39:32Z",
           "candidates": [
             {
               "source": "europepmc",
@@ -2200,6 +2227,7 @@
           "error": "",
           "title": "The PRISMA 2020 statement: an updated guideline for reporting systematic reviews.",
           "subtitle": "",
+          "alt_titles": [],
           "authors": [
             "Page",
             "McKenzie",
@@ -2278,7 +2306,7 @@
           "notice_for": "",
           "weak_retraction": false,
           "licence": "",
-          "retrieved": "2026-10-20T12:55:53Z",
+          "retrieved": "2026-10-20T13:39:32Z",
           "candidates": []
         }
       ]
@@ -2312,6 +2340,7 @@
         "raw": "Smith J, Jones A. Intravenous Turmeric and 30-Day Mortality in Cardiogenic Shock: The TURMERIC-SHOCK Randomized Trial. Lancet. 2023;401(10380):1120-1130."
       },
       "resolved": {},
+      "vancouver": "",
       "checks": [],
       "lookups": [
         {
@@ -2323,6 +2352,7 @@
           "error": "",
           "title": "",
           "subtitle": "",
+          "alt_titles": [],
           "authors": [],
           "authors_full": [],
           "first_author": "",
@@ -2347,7 +2377,7 @@
           "notice_for": "",
           "weak_retraction": false,
           "licence": "",
-          "retrieved": "2026-10-20T12:55:53Z",
+          "retrieved": "2026-10-20T13:39:33Z",
           "candidates": []
         },
         {
@@ -2359,6 +2389,7 @@
           "error": "",
           "title": "",
           "subtitle": "",
+          "alt_titles": [],
           "authors": [],
           "authors_full": [],
           "first_author": "",
@@ -2383,7 +2414,7 @@
           "notice_for": "",
           "weak_retraction": false,
           "licence": "",
-          "retrieved": "2026-10-20T12:55:54Z",
+          "retrieved": "2026-10-20T13:39:33Z",
           "candidates": []
         },
         {
@@ -2395,6 +2426,7 @@
           "error": "",
           "title": "",
           "subtitle": "",
+          "alt_titles": [],
           "authors": [],
           "authors_full": [],
           "first_author": "",
@@ -2419,7 +2451,7 @@
           "notice_for": "",
           "weak_retraction": false,
           "licence": "",
-          "retrieved": "2026-10-20T12:55:54Z",
+          "retrieved": "2026-10-20T13:39:33Z",
           "candidates": []
         },
         {
@@ -2431,6 +2463,7 @@
           "error": "",
           "title": "",
           "subtitle": "",
+          "alt_titles": [],
           "authors": [],
           "authors_full": [],
           "first_author": "",
@@ -2455,7 +2488,7 @@
           "notice_for": "",
           "weak_retraction": false,
           "licence": "",
-          "retrieved": "2026-10-20T12:55:54Z",
+          "retrieved": "2026-10-20T13:39:34Z",
           "candidates": [
             {
               "source": "crossref",
@@ -2663,6 +2696,7 @@
           "pubmed"
         ]
       },
+      "vancouver": "Nidorf SM, Fiolet ATL, Mosterd A, Eikelboom JW, Schut A, Opstal TSJ, et al. Colchicine in Patients with Chronic Coronary Disease. N Engl J Med. 2020;383(19):1838-1847. doi:10.1056/nejmoa2021372 PMID: 32865380",
       "checks": [
         {
           "field": "title",
@@ -2707,6 +2741,7 @@
           "error": "",
           "title": "Colchicine in Patients with Chronic Coronary Disease",
           "subtitle": "",
+          "alt_titles": [],
           "authors": [
             "Nidorf",
             "Fiolet",
@@ -2799,7 +2834,7 @@
           "notice_for": "",
           "weak_retraction": false,
           "licence": "",
-          "retrieved": "2026-10-20T12:55:55Z",
+          "retrieved": "2026-10-20T13:39:34Z",
           "candidates": []
         },
         {
@@ -2811,6 +2846,7 @@
           "error": "",
           "title": "",
           "subtitle": "",
+          "alt_titles": [],
           "authors": [],
           "authors_full": [],
           "first_author": "",
@@ -2835,7 +2871,7 @@
           "notice_for": "",
           "weak_retraction": false,
           "licence": "",
-          "retrieved": "2026-10-20T12:55:55Z",
+          "retrieved": "2026-10-20T13:39:34Z",
           "candidates": []
         },
         {
@@ -2847,6 +2883,7 @@
           "error": "",
           "title": "Colchicine in Patients with Chronic Coronary Disease",
           "subtitle": "",
+          "alt_titles": [],
           "authors": [
             "Nidorf",
             "Fiolet",
@@ -2939,7 +2976,7 @@
           "notice_for": "",
           "weak_retraction": false,
           "licence": "",
-          "retrieved": "2026-10-20T12:55:55Z",
+          "retrieved": "2026-10-20T13:39:34Z",
           "candidates": []
         },
         {
@@ -2951,6 +2988,7 @@
           "error": "",
           "title": "Colchicine in Patients with Chronic Coronary Disease.",
           "subtitle": "",
+          "alt_titles": [],
           "authors": [
             "Nidorf"
           ],
@@ -2977,7 +3015,7 @@
           "notice_for": "",
           "weak_retraction": false,
           "licence": "",
-          "retrieved": "2026-10-20T12:55:55Z",
+          "retrieved": "2026-10-20T13:39:34Z",
           "candidates": [
             {
               "source": "europepmc",
@@ -3005,6 +3043,7 @@
           "error": "",
           "title": "Colchicine in Patients with Chronic Coronary Disease.",
           "subtitle": "",
+          "alt_titles": [],
           "authors": [
             "Nidorf",
             "Fiolet",
@@ -3097,7 +3136,7 @@
           "notice_for": "",
           "weak_retraction": false,
           "licence": "",
-          "retrieved": "2026-10-20T12:55:55Z",
+          "retrieved": "2026-10-20T13:39:34Z",
           "candidates": []
         }
       ]

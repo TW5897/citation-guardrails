@@ -71,7 +71,13 @@ so retraction flags from PubMed apply even when the author cited only a DOI.
   author/year disagree yields `TITLE_EXISTS_AUTHOR_YEAR_DIFFER` and NOT_FOUND. A bare title with no author
   and no year cannot be confirmed: `TITLE_ONLY_UNCONFIRMED`, UNVERIFIABLE, candidates listed.
 - **Web resources** (URL, no DOI/PMID, no journal) are UNVERIFIABLE with `WEB_RESOURCE` and are never
-  matched to a paper by title. The URL is not opened.
+  matched to a paper by title. The URL is not opened. A citation whose layout cannot be parsed (author and
+  title not separable) is UNVERIFIABLE with `LAYOUT_NOT_RECOGNISED` rather than searched and reported NOT_FOUND.
+- **Identifiers must agree.** A cited PMCID is resolved through Europe PMC and a second PMID in the same item
+  through PubMed; one that belongs to a different paper is a major mismatch (`PMCID_MISMATCH`, `MULTIPLE_PMIDS`).
+- **Sibling papers.** On the identifier path, volume and first page both differing, or two or more of
+  {title in the warning band, year off by one, volume, first page}, is a major mismatch (`DIFFERENT_WORK`):
+  the DOI belongs to a related paper by the same group, not to the one cited.
 - **Field checks** only fail when the cited value disagrees with *every* record found. Title similarity
   < 0.80, first-author mismatch (tolerant to particles, hyphens, diacritics, Jr/3rd suffixes), year off by
   more than one and a cited DOI that is a correction/erratum notice (`NOTICE_DOI_CITED`) are **major** →
@@ -139,7 +145,8 @@ so retraction flags from PubMed apply even when the author cited only a DOI.
 
 ## What it cannot do
 
-- Read PDFs. Export the reference list or the manuscript to DOCX or text first.
+- Read PDFs. Export the reference list or the manuscript to DOCX or text first (Word endnotes, Shift+Enter
+  line breaks and automatic numbering are handled).
 - Verify books, book chapters, guidelines without DOIs, grey literature or web pages. These come back
   UNVERIFIABLE or NOT_FOUND and need a human; cited URLs are not opened.
 - Check every author: the first author is compared, plus a tolerance for the cited name being elsewhere

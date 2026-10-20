@@ -142,7 +142,10 @@ class Ref:
     key: str = ""                   # bibtex key / RIS id / numeric label if any
     author_parse_failed: bool = False   # the citation carried an author block the parser could not read
     extra_dois: list[str] = field(default_factory=list)   # further DOIs found in the same item (supplements, errata)
+    extra_pmids: list[str] = field(default_factory=list)
     is_web_resource: bool = False   # URL-only / organisation web page: not a journal article
+    is_chapter: bool = False        # 'Title. In: Editors. Book. Publisher; year'
+    style_unrecognised: bool = False   # author/title could not be separated (Harvard/MLA/unknown layout)
     parse_notes: list[str] = field(default_factory=list)
 
 
@@ -161,6 +164,7 @@ class Hit:
     error: str = ""
     title: str = ""
     subtitle: str = ""
+    alt_titles: list[str] = field(default_factory=list)   # vernacular / translated titles (PubMed VernacularTitle)
     authors: list[str] = field(default_factory=list)   # surnames
     authors_full: list[str] = field(default_factory=list)   # 'Family, Given' as the source gives them
     first_author: str = ""
@@ -267,6 +271,7 @@ def title_similarity(a: str, b: str) -> float:
 
 def norm_surname(name: str) -> str:
     n = strip_accents(name or "").lower().strip()
+    n = re.sub(r"[’‘ʼ´`]", "'", n)          # Word's smart quotes: O’Donnell == O'Donnell
     n = re.sub(r"[^a-z\s\-']", "", n)
     n = re.sub(r"\s+", " ", n).strip()
     return n
@@ -282,8 +287,8 @@ def surname_from_display(name: str) -> str:
     toks = name.split()
     while len(toks) >= 2 and re.fullmatch(r"(?:Jr|Sr|II|III|IV|2nd|3rd|4th)\.?", toks[-1]):   # 'Smith AB Jr', 'Stokes J 3rd'
         toks.pop()
-    # Trailing initials block (PubMed style 'Nidorf SM', 'Fiolet ATL')
-    if len(toks) >= 2 and re.fullmatch(r"[A-Z]{1,4}\.?", toks[-1]) and not re.fullmatch(r"[A-Z]{1,4}\.?", toks[0]):
+    # Trailing initials block (PubMed style 'Nidorf SM', 'Fiolet ATL', dotted 'Nidorf S.M.', 'Tardif J.-C.')
+    if len(toks) >= 2 and re.fullmatch(r"(?:[A-Z]\.?-?){1,4}", toks[-1]) and not re.fullmatch(r"(?:[A-Z]\.?-?){1,4}", toks[0]):
         core = toks[:-1]
     else:
         # Display order 'Stefan Mark Nidorf' -> last token, keeping particles
@@ -389,29 +394,79 @@ def read_docx_text(path: Path) -> str:
     except ET.ParseError as exc:
         raise InputError(f"{path.name}: cannot parse document.xml ({exc})")
     ns = {"w": _W_NS}
+    W = f"{{{_W_NS}}}"
     out: list[str] = []
     counter = 0
-    for p in root.findall(".//w:p", ns):
-        numbered = p.find("w:pPr/w:numPr", ns) is not None
-        pieces: list[str] = []
-        for r in p.findall(".//w:r", ns):
-            txt = "".join(t.text or "" for t in r.findall("w:t", ns))
-            if not txt:
+
+    def run_text(r: ET.Element) -> str:
+        """Run text in document order: w:t text, w:br/w:cr -> newline, w:tab -> tab, note references -> ^n^."""
+        parts: list[str] = []
+        for child in r:
+            tag = child.tag.replace(W, "")
+            if tag == "t":
+                parts.append(child.text or "")
+            elif tag in ("br", "cr"):
+                parts.append("\n")
+            elif tag == "tab":
+                parts.append("\t")
+            elif tag == "noBreakHyphen":
+                parts.append("-")
+            elif tag in ("endnoteReference", "footnoteReference"):
+                nid = child.get(f"{W}id")
+                if nid and nid.lstrip("-").isdigit() and int(nid) > 0:
+                    parts.append(f"^{nid}^")
+        return "".join(parts)
+
+    def paragraphs(root_el: ET.Element) -> list[str]:
+        nonlocal counter
+        blocks: list[str] = []
+        for p in root_el.findall(".//w:p", ns):
+            numbered = p.find("w:pPr/w:numPr", ns) is not None
+            pieces: list[str] = []
+            for r in p.findall(".//w:r", ns):
+                txt = run_text(r)
+                if not txt:
+                    continue
+                va = r.find("w:rPr/w:vertAlign", ns)
+                if va is not None and va.get(f"{W}val") == "superscript" and re.fullmatch(r"[\d,\-–\s]+", txt):
+                    pieces.append(f"^{txt.strip()}^")
+                else:
+                    pieces.append(txt)
+            text = "".join(pieces).strip()
+            if not text:
                 continue
-            va = r.find("w:rPr/w:vertAlign", ns)
-            if va is not None and va.get(f"{{{_W_NS}}}val") == "superscript" and re.fullmatch(r"[\d,\-–\s]+", txt):
-                pieces.append(f"^{txt.strip()}^")
-            else:
-                pieces.append(txt)
-        text = "".join(pieces).strip()
-        if not text:
-            continue
-        if numbered and not ITEM_START_RE.match(text):
-            counter += 1
-            text = f"{counter}. {text}"
-        elif not numbered:
-            counter = 0
-        out.append(text)
+            # Shift+Enter line breaks inside one paragraph are separate lines (often separate references)
+            sub = [s.strip() for s in text.split("\n") if s.strip()]
+            for k, s in enumerate(sub):
+                if numbered and k == 0 and not ITEM_START_RE.match(s):
+                    counter += 1
+                    s = f"{counter}. {s}"
+                blocks.append(s)
+            if not numbered:
+                counter = 0
+        return blocks
+
+    out = paragraphs(root)
+    # Endnotes / footnotes hold the reference list in many Word manuscripts
+    try:
+        with zipfile.ZipFile(path) as zf:
+            names = set(zf.namelist())
+            for member, tag in (("word/endnotes.xml", "endnote"), ("word/footnotes.xml", "footnote")):
+                if member in names:
+                    nroot = ET.fromstring(zf.read(member))
+                    notes: list[str] = []
+                    for note in nroot.findall(f".//w:{tag}", ns):
+                        if note.get(f"{W}type") in ("separator", "continuationSeparator"):
+                            continue
+                        nid = note.get(f"{W}id") or ""
+                        ptxt = " ".join(paragraphs(note))
+                        if ptxt:
+                            notes.append(f"{nid}. {ptxt}" if nid.isdigit() and not ITEM_START_RE.match(ptxt) else ptxt)
+                    if notes:
+                        out.append("References")
+                        out.extend(notes)
+    except (zipfile.BadZipFile, ET.ParseError):
+        pass
     return "\n\n".join(out)
 
 
@@ -799,31 +854,52 @@ def parse_tex_bibitems(text: str) -> list[Ref]:
 
 REF_HEADING_RE = re.compile(
     r"(?im)^\s*(?:#+\s*)?(?:\*\*|__)?\s*(?:\d+\.?\s*)?"
-    r"(references?(?:\s+and\s+notes)?|reference list|bibliography|works cited|literature(?:\s+cited)?|sources|citations)"
+    r"(references?(?:\s+and\s+notes)?|reference list|bibliography|works cited|literature cited)"
     r"\s*:?\s*(?:\*\*|__)?\s*$")
+# Lancet-style numbering: '1 Nidorf SM, ...' or '1<TAB>Nidorf SM, ...' (only when the rest starts like a citation)
+LANCET_ITEM_RE = re.compile(r"^\s*(\d{1,3})(?:\t|[ ]{1,2})(?=\S)")
 # Where a reference list ends inside a manuscript: tables, figure legends, appendices (with or without '#')
 SECTION_END_RE = re.compile(r"(?im)^\s*(?:#+\s*)?(?:\*\*|__)?\s*(?:tables?|figures?|fig\.?|figure legends?|legends?|supplement\w*|appendi\w*|acknowledg\w*)\b")
 ITEM_START_RE = re.compile(r"^\s*(?:\[(\d{1,3})\]|(\d{1,3})[.)]|(\d{1,3})\s{2,}|[-*•]\s+)\s*")
 
 
 def reference_section(text: str) -> str:
-    m = REF_HEADING_RE.search(text)
-    if not m:
+    matches = list(REF_HEADING_RE.finditer(text))
+    if not matches:
         return text
+    m = matches[-1]            # the reference list is the LAST such heading (a 'Bibliography' sub-section in Methods is not)
     tail = text[m.end():]
     # stop at the next section that is not part of the list (tables, figure legends, appendix ...)
     stop = SECTION_END_RE.search(tail)
     return tail[:stop.start()] if stop else tail
 
 
+def item_start(line: str) -> Optional[tuple[str, str]]:
+    """(label, rest) if the line begins a reference item: '[1]', '1.', '1)', '1<TAB>', '1 Author ...', bullets."""
+    m = ITEM_START_RE.match(line)
+    if m:
+        return (next((g for g in m.groups() if g), "") or ""), line[m.end():]
+    lm = LANCET_ITEM_RE.match(line)
+    if lm and _citation_shaped(line[lm.end():]):
+        return lm.group(1), line[lm.end():]
+    return None
+
+
+def _citation_shaped(t: str) -> bool:
+    t = squash(t)
+    return bool(DOI_RE.search(t) or PMID_RE.search(t) or PUBMED_URL_RE.search(t) or QUOTED_TITLE_RE.search(t)
+                or AUTHOR_LIST_VANCOUVER.match(t) or APA_START_RE.match(t)
+                or re.match(r"^[A-Z][\w&'’\- ]{3,120}?(?:Group|Investigators|Committee|Collaborat\w+|Consortium|Organization|Organisation|Society|Association|Institute|College|Agency)\b", t))
+
+
 def looks_like_citation(txt: str) -> bool:
     """A citation START: identifiers, or an anchored author list. A '(2021)' somewhere inside a body
     sentence is not enough -- that would send manuscript prose to the search APIs."""
     t = squash(txt)
-    t = re.sub(r"^\s*(?:\[\d{1,3}\]|\d{1,3}[.)])\s*", "", t)
-    return bool(DOI_RE.search(t) or PMID_RE.search(t) or PUBMED_URL_RE.search(t)
-                or AUTHOR_LIST_VANCOUVER.match(t) or APA_START_RE.match(t)
-                or re.match(r"^[A-Z][\w&'’\- ]{3,120}?(?:Group|Investigators|Committee|Collaborat\w+|Consortium|Organization|Organisation|Society|Association|Institute|College|Agency)\b", t))
+    st = item_start(t)
+    if st:
+        t = squash(st[1])
+    return _citation_shaped(t)
 
 
 def split_reference_items(section: str, strict: bool = False) -> list[tuple[str, str]]:
@@ -834,22 +910,29 @@ def split_reference_items(section: str, strict: bool = False) -> list[tuple[str,
     items: list[tuple[str, str]] = []
     cur_label, cur = "", ""
     nonempty = [ln for ln in lines if ln.strip()]
-    numbered = sum(1 for ln in nonempty if ITEM_START_RE.match(ln)) >= 2
+    numbered = sum(1 for ln in nonempty if item_start(ln)) >= 2
+
+    def join(prev: str, nxt: str) -> str:
+        # a DOI hard-wrapped by a PDF ('10.1016/S0140-' + '6736(17)32247-X') is re-joined without a space
+        if re.search(r"10\.\d{4,9}/\S*[-/._]$", prev) and re.match(r"\S", nxt):
+            return prev + nxt.strip()
+        return prev + " " + nxt.strip()
+
     if numbered:
         prev_blank = False
         for ln in lines:
             if not ln.strip():
                 prev_blank = True
                 continue
-            m = ITEM_START_RE.match(ln)
+            st = item_start(ln)
             # an unnumbered paragraph that itself starts like a citation is its own item, not a continuation
-            if m or (prev_blank and cur and looks_like_citation(ln) and _item_complete(cur)):
+            if st or (prev_blank and cur and looks_like_citation(ln) and _item_complete(cur)):
                 if cur:
                     items.append((cur_label, squash(cur)))
-                cur_label = (next((g for g in m.groups() if g), "") or "") if m else ""
-                cur = ln[m.end():] if m else ln.strip()
+                cur_label = st[0] if st else ""
+                cur = st[1] if st else ln.strip()
             else:
-                cur = (cur + " " + ln.strip()) if cur else ln.strip()
+                cur = join(cur, ln) if cur else ln.strip()
             prev_blank = False
         if cur:
             items.append((cur_label, squash(cur)))
@@ -860,17 +943,22 @@ def split_reference_items(section: str, strict: bool = False) -> list[tuple[str,
         if len(nonempty) >= 2 and starts >= max(2, int(0.6 * len(nonempty))):
             for ln in nonempty:
                 if looks_like_citation(ln) or not items:
-                    items.append(("", squash(ln)))
+                    st = item_start(ln)
+                    items.append((st[0], squash(st[1])) if st else ("", squash(ln)))
                 else:   # continuation of a wrapped reference
                     lbl, prev = items[-1]
-                    items[-1] = (lbl, squash(prev + " " + ln))
+                    items[-1] = (lbl, squash(join(prev, ln)))
         else:
             para: list[str] = []
             for ln in lines + [""]:
                 if ln.strip():
                     para.append(ln.strip())
                 elif para:
-                    items.append(("", squash(" ".join(para))))
+                    txt = para[0]
+                    for extra in para[1:]:
+                        txt = join(txt, extra)
+                    st = item_start(txt)           # a single numbered item still carries its label
+                    items.append((st[0], squash(st[1])) if st else ("", squash(txt)))
                     para = []
     # keep only things that look like references
     good = []
@@ -878,9 +966,9 @@ def split_reference_items(section: str, strict: bool = False) -> list[tuple[str,
         if len(txt) < 25 and not URL_RE.search(txt):
             continue
         if strict:
-            if looks_like_citation(txt) or label:
+            if looks_like_citation(txt):       # a numbered body list (objectives, criteria) is not a reference list
                 good.append((label, txt))
-        elif DOI_RE.search(txt) or PMID_RE.search(txt) or YEAR_RE.search(txt) or URL_RE.search(txt) or len(txt.split()) >= 8:
+        elif looks_like_citation(txt) or label or YEAR_TAIL_VANCOUVER.search(txt) or APA_YEAR_RE.search(txt) or URL_RE.search(txt):
             good.append((label, txt))
     return good
 
@@ -904,11 +992,13 @@ _SEP_RE = r"(?:,\s*|;\s*|\s*&\s*|\s+and\s+)"
 AUTHOR_LIST_VANCOUVER = re.compile(
     r"^(?P<authors>" + _AUTHOR_ONE + r"(?:" + _SEP_RE + _AUTHOR_ONE + r"){0,80}"
     r"(?:,?\s*(?:et\s+al\.?|and\s+others|\.{3}))?"
-    r"(?:,?\s*(?:for\s+the\s+|on\s+behalf\s+of\s+the\s+)?[A-Z][\w'’\-\s]{2,80}?(?:Group|Investigators|Committee|Collaborat\w+|Consortium|Study|Network|Team)\b\.?)?)"
+    r"(?:[,;]?\s*(?:for\s+the\s+|on\s+behalf\s+of\s+the\s+)?[A-Z][\w'’\-\s]{2,80}?(?:Group|Investigators|Committee|Collaborat\w+|Consortium|Study|Network|Team)\b\.?)?)"
     r"(?:\s*[.;]|(?<=\.))\s+(?P<rest>.*)$"
 )
 # APA reference start: 'Nidorf, S. M.,' / 'van der Meer, P.' -- anchored, used to recognise citation starts
 APA_START_RE = re.compile(rf"^{_PARTICLES_RE}[{_UC}][{_UC}{_LC}'’\-]+,\s+[A-Z]\.?(?:\s?-?[A-Z]\.?)*,?")
+# Harvard / MLA / Chicago: the title sits in quotation marks
+QUOTED_TITLE_RE = re.compile(r"[\"“‘']((?:[^\"”’']|'(?=\w)){15,300}?)[\"”’'](?=[\s,.])")
 # A publication-year tail: '. 2020;383(19):1838-1847', ' 2021;372:n71', '. 2019 May 15;73(21):2756', '. 2020.'
 YEAR_TAIL_VANCOUVER = re.compile(
     r"(?<![\w\-])(?P<year>(?:19|20)\d{2})\s*(?:[A-Z][a-z]{2}\.?(?:\s\d{1,2})?(?:-[A-Z][a-z]{2})?)?"
@@ -929,9 +1019,11 @@ def parse_free_citation(raw: str, ref_id: str) -> Ref:
         explicit = re.search(r"(?:doi\s*:?\s*|doi\.org/)(" + DOI_RE.pattern + r")", text, flags=re.I)
         ref.doi = clean_doi(explicit.group(1)) if explicit else dois[0]
         ref.extra_dois = [d for d in dois if d != ref.doi]
-    pm = PMID_RE.search(text) or PUBMED_URL_RE.search(text)
-    if pm:
-        ref.pmid = pm.group(1)
+    pmids = [m.group(1) for m in PMID_RE.finditer(text)] + [m.group(1) for m in PUBMED_URL_RE.finditer(text)]
+    pmids = list(dict.fromkeys(pmids))
+    if pmids:
+        ref.pmid = pmids[0]
+        ref.extra_pmids = pmids[1:]
     pc = PMCID_RE.search(text)
     if pc:
         ref.pmcid = pc.group(1).upper()
@@ -949,6 +1041,59 @@ def parse_free_citation(raw: str, ref_id: str) -> Ref:
     body = re.sub(r"\[\s*(?:Internet|published online[^\]]*|Epub[^\]]*)\s*\]", " ", body, flags=re.I)
     body = squash(body.replace("*", "").replace("_", " ")).strip(" .;,")
     body = re.sub(r"^\s*(?:et\s+al\.?|\.{3})\s*", "", body)      # a list that starts with 'et al.' has lost its authors
+    body = re.sub(r",\s*et\s+al\.?\s*,\s*(?=[A-ZÀ-Þ])", ", ", body)   # 'Smith J, et al, Jones K' -> drop the stray 'et al' mid-list
+
+    # Book chapter: 'Chapter title. In: Editors, editors. Book title. Place: Publisher; year. p. x-y'
+    chap = re.search(r"\.\s+In:?\s+(?=[A-Z])", body)
+    if chap:
+        ref.is_chapter = True
+        head, tail = body[:chap.start()], body[chap.end():]
+        am = AUTHOR_LIST_VANCOUVER.match(head + ". x")
+        if am:
+            for chunk in re.split(r",\s*|;\s*|\s+and\s+|\s*&\s*", am.group("authors")):
+                chunk = chunk.strip(" .")
+                if chunk and not chunk.lower().startswith("et al"):
+                    ref.authors.append(surname_from_display(chunk))
+            ref.title = squash(am.group("rest").rstrip(" .x")).rstrip(".")
+        else:
+            ref.title = head.strip(" .")
+        bm = re.search(r"\b(?:editors?|eds?)\b\.?\s*(?P<book>[^.;]{3,200}?)[.;]", tail)
+        ref.journal = squash(bm.group("book")) if bm else squash(re.split(r"[.;]", tail, 1)[0])
+        ym = YEAR_RE.findall(tail)
+        ref.year = ym[-1] if ym else ""
+        pg = re.search(r"\bpp?\.?\s*([\w\-–]+)", tail)
+        ref.pages = pg.group(1) if pg else ""
+        ref.style_guess = "chapter"
+        ref.authors = [a for a in ref.authors if a]
+        ref.first_author = ref.authors[0] if ref.authors else ""
+        ref.title = squash(strip_tags(ref.title)).strip("\"'“”")
+        ref.parse_confidence = "high" if (ref.doi or ref.pmid) else ("medium" if (ref.title and ref.year) else "low")
+        return ref
+
+    # Harvard / MLA / Chicago: quoted title, authors before it, container after it
+    qm = QUOTED_TITLE_RE.search(body)
+    if qm and len(qm.group(1).split()) >= 4:
+        ref.style_guess = "quoted-title"
+        ref.title = qm.group(1).strip()
+        head, tail = body[:qm.start()], body[qm.end():]
+        head = re.sub(r"\(\s*(?:19|20)\d{2}[a-z]?\s*\)\.?", " ", head)
+        for chunk in re.split(r",\s*(?=[A-ZÀ-Þ][a-zà-ÿ'’\-]+(?:,|\s)|et\s+al)|;\s*|\s+and\s+|\s*&\s*", head):
+            chunk = chunk.strip(" .,")
+            if chunk and not chunk.lower().startswith("et al"):
+                ref.authors.append(surname_from_display(chunk))
+        ym = YEAR_RE.findall(body)
+        ref.year = ym[-1] if ym else ""
+        jm = re.match(r"\s*,?\s*(?:In\s+)?(?P<journal>[A-Z][^,;]{2,90}?)\s*[,;]", tail)
+        ref.journal = squash(jm.group("journal")) if jm else ""
+        vm = re.search(r"(?:vol\.?\s*)?(\d{1,4})\s*(?:\((\w+)\)|,\s*no\.\s*(\w+))?", tail)
+        if vm:
+            ref.volume, ref.issue = vm.group(1), (vm.group(2) or vm.group(3) or "")
+        pg = re.search(r"\bpp?\.?\s*([\w\-–]+)", tail)
+        ref.pages = pg.group(1) if pg else ""
+        ref.authors = [a for a in ref.authors if a]
+        ref.first_author = ref.authors[0] if ref.authors else ""
+        ref.parse_confidence = "high" if (ref.doi or ref.pmid) else ("medium" if (ref.title and ref.year and ref.first_author) else "low")
+        return ref
 
     apa = APA_YEAR_RE.search(body)
     if apa and apa.start() < len(body) * 0.6:
@@ -1039,6 +1184,11 @@ def parse_free_citation(raw: str, ref_id: str) -> Ref:
     # no journal. These are not journal articles and must not be matched to one by title.
     if ref.url and not ref.doi and not ref.pmid and not ref.journal and not PUBMED_URL_RE.search(ref.url) and "doi.org" not in ref.url.lower():
         ref.is_web_resource = True
+    # A 'title' that still contains author-like tokens, quotes or 'pp.' means the layout was not understood:
+    # searching databases for it would only produce a misleading NOT_FOUND
+    if not ref.doi and not ref.pmid and ref.title and re.search(r"[A-Z][a-z]+,\s+[A-Z]\.|\b[A-ZÀ-Þ][a-zà-ÿ'’\-]+ [A-Z]{1,3},\s|\bet al\b|\bpp\.|\bvol\.|[\"“”]", ref.title):
+        ref.style_unrecognised = True
+        ref.parse_notes.append("citation layout not recognised (author and title could not be separated); add a DOI or PMID, or reformat as Vancouver or APA")
     if ref.doi or ref.pmid:
         ref.parse_confidence = "high"
     elif ref.title and ref.year and ref.first_author:
@@ -1091,9 +1241,27 @@ def parse_input(path: Path, fmt: str = "auto") -> list[Ref]:
     return parse_reference_list(text)
 
 
+def rejoin_shell_split_dois(ids: list[str]) -> list[str]:
+    """PowerShell splits '10.1016/S0140-6736(20)31180-6' into ['10.1016/S0140-6736', '20', '31180-6']; put it back."""
+    out: list[str] = []
+    i = 0
+    while i < len(ids):
+        tok = ids[i].strip()
+        if (DOI_RE.search(tok) and i + 2 < len(ids) and re.fullmatch(r"\d{1,4}", ids[i + 1].strip())
+                and re.fullmatch(r"[\w\-]+", ids[i + 2].strip()) and re.search(r"[\-/]\w+$", tok)):
+            joined = f"{tok}({ids[i + 1].strip()}){ids[i + 2].strip()}"
+            eprint(f"[citecheck] a DOI looked split by the shell at its parentheses and was re-joined as {joined}; quote DOIs with parentheses next time")
+            out.append(joined)
+            i += 3
+            continue
+        out.append(tok)
+        i += 1
+    return out
+
+
 def refs_from_ids(ids: list[str]) -> list[Ref]:
     refs = []
-    for i, tok in enumerate(ids, 1):
+    for i, tok in enumerate(rejoin_shell_split_dois(ids), 1):
         tok = tok.strip()
         dm = DOI_RE.search(tok)
         if dm:
@@ -1483,6 +1651,12 @@ def _fill_from_pubmed_xml(h: Hit, art: ET.Element, want_abstract: bool) -> None:
     if a is None:
         return
     h.title = squash(html.unescape("".join(a.find("ArticleTitle").itertext()) if a.find("ArticleTitle") is not None else ""))
+    # Non-English articles: ArticleTitle is PubMed's bracketed translation; VernacularTitle is the real title
+    vt = a.find("VernacularTitle")
+    if vt is not None and "".join(vt.itertext()).strip():
+        h.alt_titles.append(squash(html.unescape("".join(vt.itertext()))))
+    if h.title.startswith("[") and h.title.rstrip(".").endswith("]"):
+        h.alt_titles.append(h.title.rstrip(".").strip("[]"))
     j = a.find("Journal")
     if j is not None:
         h.journal = squash(j.findtext("Title") or "")
@@ -1548,8 +1722,8 @@ def _fill_from_pubmed_xml(h: Hit, art: ET.Element, want_abstract: bool) -> None:
     _mark_preprint(h)
 
 
-def pubmed_search(http: Http, term: str, retmax: int = 5) -> tuple[list[str], str]:
-    url = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?" + ncbi_params(http, db="pubmed", term=term, retmode="json", retmax=str(retmax))
+def pubmed_search(http: Http, term: str, retmax: int = 5, sort: str = "") -> tuple[list[str], str]:
+    url = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?" + ncbi_params(http, db="pubmed", term=term, retmode="json", retmax=str(retmax), sort=sort)
     status, data = http.get_json(url)
     if status != 200 or not data:
         return [], f"HTTP {status}"
@@ -1730,7 +1904,7 @@ def _europepmc_record(r: dict) -> Hit:
 
 
 def europepmc_by_id(http: Http, kind: str, val: str, core: bool = False) -> Hit:
-    q = f'DOI:"{val}"' if kind == "doi" else f"EXT_ID:{val} AND SRC:MED"
+    q = {"doi": f'DOI:"{val}"', "pmid": f"EXT_ID:{val} AND SRC:MED", "pmcid": f"PMCID:{val.upper()}"}[kind]
     h = europepmc_query(http, q, f"{kind}:{val}", core=core, page_size=3)
     if not h.ok:
         return h
@@ -1741,6 +1915,9 @@ def europepmc_by_id(http: Http, kind: str, val: str, core: bool = False) -> Hit:
             match = c
             break
         if kind == "pmid" and str(c.get("pmid")) == val:
+            match = c
+            break
+        if kind == "pmcid" and str(c.get("pmcid") or "").upper() == val.upper():
             match = c
             break
     if match is None:
@@ -1868,16 +2045,18 @@ class Verifier:
             return checks, major, warnings
 
         # Title
+        title_band_warning = False
         if ref.title:
             best, best_h = 0.0, meta[0]
             for h in meta:
-                for cand in filter(None, [h.title, f"{h.title}: {h.subtitle}" if h.subtitle else ""]):
+                for cand in filter(None, [h.title, f"{h.title}: {h.subtitle}" if h.subtitle else ""] + list(h.alt_titles)):
                     s = title_similarity(ref.title, cand)
                     if s > best:
                         best, best_h = s, h
             if best >= TITLE_MATCH:
                 checks.append(Check("title", ref.title, best_h.title, best_h.source, "match", f"similarity {best}"))
             elif best >= TITLE_WARN:
+                title_band_warning = True
                 checks.append(Check("title", ref.title, best_h.title, best_h.source, "warning", f"similarity {best} (minor wording difference)"))
                 warnings.append(f"title differs slightly from {best_h.source} (similarity {best})")
             else:
@@ -1937,18 +2116,29 @@ class Verifier:
                     checks.append(Check("journal", ref.journal, cands[0], meta[0].source, "warning", "journal name differs"))
                     warnings.append(f"journal differs: cited '{ref.journal}', source '{cands[0]}'")
 
-        # Volume / pages (informational)
+        # Volume / pages (informational on their own; together they identify a different work)
+        vol_differs = page_differs = False
         if ref.volume:
             vols = [h.volume for h in meta if h.volume]
             if vols and ref.volume.strip() not in [v.strip() for v in vols]:
+                vol_differs = True
                 checks.append(Check("volume", ref.volume, vols[0], meta[0].source, "warning"))
                 warnings.append(f"volume differs: cited {ref.volume}, source {vols[0]}")
         if ref.pages:
             cp = re.sub(r"[^\w]", "", ref.pages.split("-")[0].split("–")[0])
             pages = [h.pages for h in meta if h.pages]
             if pages and cp and not any(re.sub(r"[^\w]", "", p.split("-")[0]).lower() == cp.lower() for p in pages):
+                page_differs = True
                 checks.append(Check("pages", ref.pages, pages[0], meta[0].source, "warning"))
                 warnings.append(f"first page differs: cited {ref.pages}, source {pages[0]}")
+        # Sibling-paper Frankenstein (SUSTAIN-6 title on LEADER's DOI): each field is only slightly off,
+        # but several together mean the identifier belongs to a different paper.
+        year_off_by_one = any(c.field == "year" and c.outcome == "warning" for c in checks)
+        signals = sum([title_band_warning, year_off_by_one, vol_differs, page_differs])
+        if (vol_differs and page_differs) or signals >= 2:
+            major.append("several cited fields point to a different paper than the identifier resolves to ("
+                         + ", ".join(k for k, v in (("title wording", title_band_warning), ("year", year_off_by_one), ("volume", vol_differs), ("first page", page_differs)) if v)
+                         + "); the DOI/PMID probably belongs to a sibling paper (DIFFERENT_WORK)")
         return checks, major, warnings
 
     # ---- main entry ------------------------------------------------------------------
@@ -2022,27 +2212,48 @@ class Verifier:
                 issues.append(f"DOI and PMID point to different works: DOI -> \"{dt[:90]}\"; PMID -> \"{pt[:90]}\"")
                 res.flags.append("IDENTIFIER_CONFLICT")
 
-        if ref.pmcid and meta_found:
-            rec_pmc = next((h.pmcid for h in meta_found if h.pmcid), "")
-            if rec_pmc and rec_pmc.upper() != ref.pmcid.upper():
-                res.flags.append("PMCID_MISMATCH")
-                issues.append(f"cited PMCID {ref.pmcid} is not this paper's PMCID ({rec_pmc})")
-
         # Title-only path
         title_hits: list[Hit] = []
+        extra_major: list[str] = []
         if not meta_found and not ref.doi and not ref.pmid:
-            if ref.title and len(ref.title.split()) >= 3:
+            if ref.style_unrecognised:
+                notes.append("title search skipped: the citation layout was not understood, so the 'title' is unreliable")
+            elif ref.title and len(ref.title.split()) >= 3:
                 title_hits = self.lookup_title(ref)
                 all_hits += title_hits
                 accepted = self._accept_title_candidate(ref, title_hits, res)
                 if accepted:
-                    found, meta_found = [accepted], [accepted]
+                    found, meta_found = list(accepted), list(accepted)
                     res.found_by = "title"
                     res.flags.append("TITLE_MATCHED")
-                    corroborated = getattr(accepted, "_corroborated", []) or []
+                    corroborated = getattr(accepted[0], "_corroborated", []) or []
                     notes.append("no DOI/PMID in the citation; matched by title search and confirmed by " + ("/".join(corroborated) if corroborated else "title alone"))
             else:
                 notes.append("no DOI, PMID or usable title could be parsed from this citation")
+
+        # A cited PMCID is an identifier too: resolve it and make sure it is the same paper
+        if ref.pmcid and "europepmc" in self.sources:
+            pch = europepmc_by_id(self.http, "pmcid", ref.pmcid)
+            all_hits.append(pch)
+            if pch.found:
+                same_pmc = any((h.pmid and pch.pmid and h.pmid == pch.pmid) or (h.doi and pch.doi and h.doi == pch.doi)
+                               or (h.title and pch.title and title_similarity(h.title, pch.title) >= TITLE_MATCH) for h in meta_found)
+                if meta_found and not same_pmc:
+                    res.flags.append("PMCID_MISMATCH")
+                    extra_major.append(f"cited PMCID {ref.pmcid} belongs to a different paper (\"{pch.title[:80]}\")")
+                elif not meta_found and ref.title and title_similarity(ref.title, pch.title) >= TITLE_MATCH:
+                    found, meta_found = [pch], [pch]
+                    res.found_by = "pmcid"
+            elif pch.ok:
+                res.flags.append("PMCID_NOT_FOUND")
+                notes.append(f"cited PMCID {ref.pmcid} does not exist in Europe PMC")
+        # Further PMIDs in the same item must be the same paper
+        if ref.extra_pmids and "pubmed" in self.sources:
+            res.flags.append("MULTIPLE_PMIDS")
+            for eh in pubmed_fetch_many(self.http, ref.extra_pmids):
+                same_p = any((h.pmid and h.pmid == eh.pmid) or (h.doi and eh.doi and h.doi == eh.doi) or (h.title and title_similarity(h.title, eh.title) >= TITLE_MATCH) for h in meta_found)
+                if meta_found and not same_p:
+                    extra_major.append(f"PMID {eh.pmid} cited in the same item belongs to a different paper (\"{eh.title[:80]}\")")
         elif not meta_found and (ref.doi or ref.pmid) and ref.title and len(ref.title.split()) >= 3 and (doi_missing or pmid_missing):
             # identifiers are dead; see whether the title exists elsewhere so the user gets the right fix
             title_hits = self.lookup_title(ref)
@@ -2056,6 +2267,12 @@ class Verifier:
         # Field checks: only records that carry metadata count; a bare doi.org redirect compares nothing
         checks, major, warnings = self.field_checks(ref, meta_found) if meta_found else ([], [], [])
         res.checks = checks
+        major.extend(extra_major)
+        if any("DIFFERENT_WORK" in m for m in major):
+            res.flags.append("DIFFERENT_WORK")
+        if ref.is_chapter:
+            res.flags.append("BOOK_CHAPTER")
+            # the container (book) is compared as the journal: a difference there is only a warning, already handled
         if meta_found and ref.author_parse_failed and not ref.first_author:
             warnings.append("the author list could not be parsed from the citation, so the first author was NOT checked; compare it by hand")
             res.flags.append("AUTHOR_NOT_CHECKED")
@@ -2125,6 +2342,10 @@ class Verifier:
                 issues.append("the DOI resolves at doi.org but no database returned a bibliographic record, so the cited title, author and year were NOT compared; open the DOI and check it by hand")
             elif (ref.doi or ref.pmid) and (doi_missing or pmid_missing) and not (doi_unknown or pmid_unknown):
                 res.status = "NOT_FOUND"
+            elif ref.style_unrecognised and not (ref.doi or ref.pmid):
+                res.status = "UNVERIFIABLE"
+                res.flags.append("LAYOUT_NOT_RECOGNISED")
+                issues.append("citation layout not recognised (author and title could not be separated), so it was not searched; add a DOI or PMID, or reformat it as Vancouver or APA")
             elif "TITLE_ONLY_UNCONFIRMED" in res.flags:
                 res.status = "UNVERIFIABLE"
             elif title_hits:
@@ -2182,7 +2403,7 @@ class Verifier:
                     best = (s, c)
         return best
 
-    def _accept_title_candidate(self, ref: Ref, title_hits: list[Hit], res: Result) -> Optional[Hit]:
+    def _accept_title_candidate(self, ref: Ref, title_hits: list[Hit], res: Result) -> Optional[list[Hit]]:
         # Gather candidates from every source, dedupe by DOI/PMID, score each
         seen: dict[str, dict] = {}
         for h in title_hits:
@@ -2204,6 +2425,13 @@ class Verifier:
             if "(issn)" in (c.get("doi") or "") or (c.get("type") or "") in ("journal", "journal-issue", "journal-volume"):
                 continue   # a journal's own record, not a paper
             s = title_similarity(ref.title, c.get("title") or "")
+            # A bracketed candidate title is PubMed/Europe PMC's English translation of a non-English paper:
+            # compare the cited title with the vernacular title held in the PubMed record instead.
+            if s < TITLE_MATCH and (c.get("title") or "").startswith("[") and c.get("pmid") and "pubmed" in self.sources:
+                ph = pubmed_by_pmid(self.http, c["pmid"])
+                if ph.found and ph.alt_titles:
+                    s = max([s] + [title_similarity(ref.title, t) for t in ph.alt_titles])
+                    c["_promoted"] = ph
             both_authors = bool(ref.first_author and c.get("first_author"))
             author_conf = both_authors and surnames_match(ref.first_author, c["first_author"])
             author_bad = both_authors and not author_conf
@@ -2248,20 +2476,24 @@ class Verifier:
                                      + "; ".join(f"{(t[4].get('journal') or '?')} {t[4].get('year')} DOI {t[4].get('doi') or '-'}" for t in accepted[:4]))
             c = accepted[0][4]
             corroborated = c.get("_corroborated", [])
-            # Promote the candidate to a full record via its identifiers for a proper cross-check
-            h: Optional[Hit] = None
-            if c.get("pmid") and "pubmed" in self.sources:
+            # The candidate's own record (OpenAlex/CrossRef, which holds the original-language title) stays
+            # alongside the promoted PubMed/CrossRef record, so a field only fails if it disagrees with both.
+            synthetic = Hit(source=c.get("source", "title-search"), query=f"title:{ref.title[:80]}", found=True, title=c.get("title", ""), first_author=c.get("first_author", ""), authors=[c.get("first_author", "")], year=c.get("year", ""), journal=c.get("journal", ""), volume=str(c.get("volume") or ""), pages=str(c.get("pages") or ""), doi=c.get("doi", ""), pmid=c.get("pmid", ""), pmcid=c.get("pmcid", ""), retracted=bool(c.get("retracted")), preprint=bool(c.get("preprint")), work_type=c.get("type", ""), retrieved=utcnow())
+            out: list[Hit] = []
+            if c.get("_promoted") is not None:
+                out.append(c["_promoted"])
+            elif c.get("pmid") and "pubmed" in self.sources:
                 ph = pubmed_by_pmid(self.http, c["pmid"])
                 if ph.found:
-                    h = ph
-            if h is None and c.get("doi") and "crossref" in self.sources:
+                    out.append(ph)
+            if not out and c.get("doi") and "crossref" in self.sources:
                 ch = crossref_by_doi(self.http, c["doi"])
                 if ch.found:
-                    h = ch
-            if h is None:
-                h = Hit(source=c.get("source", "title-search"), query=f"title:{ref.title[:80]}", found=True, title=c.get("title", ""), first_author=c.get("first_author", ""), authors=[c.get("first_author", "")], year=c.get("year", ""), journal=c.get("journal", ""), volume=str(c.get("volume") or ""), pages=str(c.get("pages") or ""), doi=c.get("doi", ""), pmid=c.get("pmid", ""), pmcid=c.get("pmcid", ""), retracted=bool(c.get("retracted")), preprint=bool(c.get("preprint")), work_type=c.get("type", ""), retrieved=utcnow())
-            setattr(h, "_corroborated", corroborated)
-            return h
+                    out.append(ch)
+            out.append(synthetic)
+            for h in out:
+                setattr(h, "_corroborated", corroborated)
+            return out
         if strong:
             s, _, _, _, c = strong[0]
             res.flags.append("TITLE_EXISTS_AUTHOR_YEAR_DIFFER")
@@ -2363,7 +2595,8 @@ def build_audit(results: list[Result], source: str, opts: dict) -> dict:
             {
                 "ref_id": r.ref_id, "status": r.status, "confidence": r.confidence, "found_by": r.found_by,
                 "flags": r.flags, "sources_confirming": r.sources_confirming, "issues": r.issues, "notes": r.notes,
-                "cited": r.cited, "resolved": r.resolved, "checks": [asdict(c) for c in r.checks], "lookups": r.hits,
+                "cited": r.cited, "resolved": r.resolved, "vancouver": vancouver(r.resolved) if r.resolved else "",
+                "checks": [asdict(c) for c in r.checks], "lookups": r.hits,
             }
             for r in results
         ],
@@ -2436,7 +2669,29 @@ def print_summary(audit: dict, quiet: bool = False) -> None:
     print("counts: " + ", ".join(f"{k}={v}" for k, v in sorted(audit["counts"].items())) + (" | flags: " + ", ".join(f"{k}={v}" for k, v in sorted(audit["flags"].items())) if audit["flags"] else ""))
     print(f"submission_safe={audit['submission_safe']}  blocking={audit['blocking_ref_ids']}  unchecked={audit.get('unchecked_ref_ids', [])}  needs_review={audit['needs_review_ref_ids']}")
     if audit.get("unchecked"):
-        print(f"WARNING: {audit['unchecked']} reference(s) were NOT checked" + (" (offline run)" if audit.get("offline") else " (network failure or rate limit; re-run, or use --no-cache)") + ". Nothing unchecked is verified.")
+        causes: dict[str, list[str]] = {}
+        for r in audit["records"]:
+            if r["status"] != "UNVERIFIABLE":
+                continue
+            fl = set(r["flags"])
+            if audit.get("offline"):
+                cause = "offline run: nothing was queried"
+            elif "WEB_RESOURCE" in fl:
+                cause = "web page / organisation document: open the URL and check it by hand"
+            elif "TITLE_ONLY_UNCONFIRMED" in fl:
+                cause = "title found but no cited author or year to confirm it: add the first author and year, or the DOI/PMID"
+            elif "DOI_RESOLVES_NO_METADATA" in fl:
+                cause = "DOI resolves but no database holds its metadata: open the DOI and compare by hand"
+            elif "LAYOUT_NOT_RECOGNISED" in fl:
+                cause = "citation layout not recognised: add a DOI/PMID or reformat as Vancouver/APA"
+            elif any("not attempted" in i or "could not be checked" in i or "incomplete" in i for i in r["issues"]):
+                cause = "network failure or rate limit: re-run later, or with --no-cache"
+            else:
+                cause = "could not parse a DOI, PMID or title from the citation"
+            causes.setdefault(cause, []).append(r["ref_id"])
+        print(f"NOT CHECKED: {audit['unchecked']} reference(s). Nothing unchecked is verified.")
+        for cause, ids in causes.items():
+            print(f"  - {', '.join(ids[:8])}{' ...' if len(ids) > 8 else ''}: {cause}")
 
 
 # --------------------------------------------------------------------------------------
@@ -2588,7 +2843,9 @@ def expand_numeric(tok: str) -> list[str]:
 def split_sentences(text: str) -> list[str]:
     # protect abbreviations ('et al. (2020)', 'Fig. 1') with a non-whitespace placeholder (\s matches NBSP too)
     text = re.sub(r"\b(et al|Fig|Figs|vs|e\.g|i\.e|Dr|Prof|No|approx|ref|Refs?|cf)\.\s", lambda m: m.group(0)[:-1] + "\x01", text)
-    parts = re.split(r"(?<=[.!?])\s+(?=[A-Z\[\(\"“])", text)
+    # a superscript marker after the full stop ('events.^1^ Next') belongs to the sentence it follows
+    text = re.sub(r"([.!?])((?:\^[\d,\-–\s]+\^)+)\s+(?=[A-Z\[\(\"“])", lambda m: m.group(1) + m.group(2) + "\x02", text)
+    parts = re.split(r"(?<=[.!?])\s+(?=[A-Z\[\(\"“])|\x02", text)
     return [squash(p.replace("\x01", " ")) for p in parts if squash(p.replace("\x01", " "))]
 
 
@@ -2701,9 +2958,9 @@ def find_candidates(http: Http, verifier: Verifier, query: str, max_results: int
         term += f' AND ("{year_from or "1900"}"[Date - Publication] : "{year_to or "3000"}"[Date - Publication])'
     cands: dict[str, dict] = {}
     if "pubmed" in verifier.sources:
-        pmids, err = pubmed_search(http, term, max_results)
+        pmids, err = pubmed_search(http, term, max_results, sort="relevance")   # default PubMed order is newest-first
         for h in pubmed_fetch_many(http, pmids):
-            cands[h.doi or f"pmid:{h.pmid}"] = {"pmid": h.pmid, "doi": h.doi, "title": h.title, "first_author": h.first_author, "year": h.year, "journal": h.journal_abbrev or h.journal}
+            cands[h.doi or f"pmid:{h.pmid}"] = {"pmid": h.pmid, "doi": h.doi, "title": h.title, "first_author": h.first_author, "year": h.year, "journal": h.journal_abbrev or h.journal, "_src": "pubmed"}
     if "openalex" in verifier.sources:
         extra = openalex_params(http)
         url = "https://api.openalex.org/works?search=" + urllib.parse.quote(query) + f"&per-page={max_results}&select=id,doi,title,publication_year,ids,authorships,primary_location,type,is_retracted,biblio" + (f"&filter=publication_year:{year_from or 1900}-{year_to or 2100}" if (year_from or year_to) else "") + (f"&{extra}" if extra else "")
@@ -2715,7 +2972,14 @@ def find_candidates(http: Http, verifier: Verifier, query: str, max_results: int
             if k not in cands:
                 cands[k] = {"pmid": c.pmid, "doi": c.doi, "title": c.title, "first_author": c.first_author, "year": c.year, "journal": c.journal}
     results: list[Result] = []
-    for i, (k, c) in enumerate(list(cands.items())[: max_results * 2], 1):
+    # interleave PubMed and OpenAlex hits so one source's ordering cannot crowd out the other
+    pub = [(k, c) for k, c in cands.items() if c.get("_src") == "pubmed"]
+    oa = [(k, c) for k, c in cands.items() if c.get("_src") != "pubmed"]
+    ordered: list[tuple[str, dict]] = []
+    for a, b in zip(pub, oa):
+        ordered += [a, b]
+    ordered += pub[len(oa):] + oa[len(pub):]
+    for i, (k, c) in enumerate(ordered[: max_results * 2], 1):
         ref = Ref(ref_id=f"cand_{i}", raw=k, title=c["title"], first_author=c["first_author"], authors=[c["first_author"]] if c["first_author"] else [], year=c["year"], journal=c["journal"], doi=c["doi"], pmid=c["pmid"], parse_confidence="high")
         results.append(verifier.verify(ref))
     return results
@@ -2982,11 +3246,22 @@ def cmd_evidence(args: argparse.Namespace) -> int:
         results = [verifier.verify(r) for r in refs]
         audit = build_audit(results, display_path(p) if not args.ids else "command-line identifiers", {"sources": list(parse_sources(args.sources)), "cache_hits": http.cache_hits})
         out_dir.mkdir(parents=True, exist_ok=True)
-        (out_dir / "reference_audit.json").write_text(json.dumps(audit, indent=2, ensure_ascii=False), encoding="utf-8")
-        (out_dir / "reference_audit.md").write_text(audit_markdown(audit), encoding="utf-8")
+        if args.ids:
+            # never clobber the manuscript's own audit with a one-off lookup
+            (out_dir / "evidence").mkdir(parents=True, exist_ok=True)
+            (out_dir / "evidence" / "ids_audit.json").write_text(json.dumps(audit, indent=2, ensure_ascii=False), encoding="utf-8")
+        else:
+            (out_dir / "reference_audit.json").write_text(json.dumps(audit, indent=2, ensure_ascii=False), encoding="utf-8")
+            (out_dir / "reference_audit.md").write_text(audit_markdown(audit), encoding="utf-8")
     records = audit["records"]
     ev_dir = out_dir / "evidence"
     index = []
+    existing: list[dict] = []
+    if (ev_dir / "index.json").exists():
+        try:
+            existing = json.loads((ev_dir / "index.json").read_text(encoding="utf-8")).get("packs") or []
+        except Exception:
+            existing = []
     for rec in records:
         rid = rec["ref_id"]
         if args.only and rid not in args.only:
@@ -3004,6 +3279,9 @@ def cmd_evidence(args: argparse.Namespace) -> int:
             eprint(f"{rid}: {ev['tier']} ({len(ev['fulltext'] or ev['abstract'])} chars)")
     http.save_cache()
     ev_dir.mkdir(parents=True, exist_ok=True)
+    # merge with packs already in the folder (an --ids lookup must not erase the manuscript's index)
+    new_ids = {i["ref_id"] for i in index}
+    index = [e for e in existing if e.get("ref_id") not in new_ids] + index
     (ev_dir / "index.json").write_text(json.dumps({"generated": utcnow(), "source": display_path(p) if not args.ids else "command-line identifiers",
                                                    "note": "Packs contain publishers' abstracts and open-access full text under their own licences (stated in each pack). They are for your own reading while checking claims: do not commit them to public repositories or redistribute them.",
                                                    "packs": index}, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -3023,7 +3301,7 @@ def cmd_claims(args: argparse.Namespace) -> int:
     claims = extract_claims(text, args.style)
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    (out_dir / "claims_to_check.json").write_text(json.dumps({"manuscript": str(p), "generated": utcnow(), "claims": claims}, indent=2, ensure_ascii=False), encoding="utf-8")
+    (out_dir / "claims_to_check.json").write_text(json.dumps({"manuscript": display_path(p), "generated": utcnow(), "claims": claims}, indent=2, ensure_ascii=False), encoding="utf-8")
     (out_dir / "claims_to_check.md").write_text(claims_markdown(claims, str(p)), encoding="utf-8")
     types = {}
     for c in claims:
@@ -3037,8 +3315,9 @@ def cmd_find(args: argparse.Namespace) -> int:
     verifier = Verifier(http, parse_sources(args.sources), quiet=True)
     results = find_candidates(http, verifier, " ".join(args.query), args.max, args.year_from, args.year_to)
     http.save_cache()
-    # 'verified' means at least two independent databases returned the record and nothing is retracted
-    verified = [r for r in results if r.status in ("VERIFIED", "VERIFIED_WITH_WARNINGS") and r.resolved and len(r.sources_confirming) >= 2][: args.max]
+    # 'verified' means at least two independent databases returned the record and nothing is retracted;
+    # every verified hit is shown (PubMed and OpenAlex hits interleaved), never silently truncated
+    verified = [r for r in results if r.status in ("VERIFIED", "VERIFIED_WITH_WARNINGS") and r.resolved and len(r.sources_confirming) >= 2]
     single = [r for r in results if r.status in ("VERIFIED", "VERIFIED_WITH_WARNINGS") and r.resolved and len(r.sources_confirming) < 2]
     retracted = [r for r in results if r.status == "RETRACTED" and r.resolved]
     if args.json:
@@ -3066,10 +3345,17 @@ def cmd_find(args: argparse.Namespace) -> int:
             chosen = [verified[i - 1] for i in args.pick if 1 <= i <= len(verified)]
         if chosen:
             Path(args.bib).parent.mkdir(parents=True, exist_ok=True)
+            have = Path(args.bib).read_text(encoding="utf-8", errors="replace").lower() if Path(args.bib).exists() else ""
+            written, skipped = 0, 0
             with open(args.bib, "a", encoding="utf-8") as fh:
                 for r in chosen:
+                    ident = (r.resolved.get("doi") or "").lower() or (r.resolved.get("pmid") or "")
+                    if ident and ident in have:
+                        skipped += 1
+                        continue
                     fh.write(bibtex_entry(r.resolved) + "\n\n")
-            print(f"\nappended {len(chosen)} verified BibTeX entr{'y' if len(chosen) == 1 else 'ies'} (with verified_on stamps) to {args.bib}" + ("" if args.pick else "; use --pick N to write only the one you chose"))
+                    written += 1
+            print(f"\nappended {written} verified BibTeX entr{'y' if written == 1 else 'ies'} (with verified_on stamps) to {args.bib}" + (f"; {skipped} already present, not duplicated" if skipped else "") + ("" if args.pick else "; use --pick N to write only the one you chose"))
         else:
             print("\nnothing written to --bib: no verified candidate" + (" among the picked numbers" if args.pick else ""))
     return 0 if verified else 1

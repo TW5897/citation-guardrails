@@ -1,6 +1,6 @@
 # Reference audit - manuscript.md
 
-Generated 2026-10-20T12:55:55Z by citecheck v0.1.0. Sources: crossref, pubmed, openalex, europepmc, datacite.
+Generated 2026-10-20T13:39:34Z by citecheck v0.1.0. Sources: crossref, pubmed, openalex, europepmc, datacite.
 
 | Status | Count |
 |---|---|
