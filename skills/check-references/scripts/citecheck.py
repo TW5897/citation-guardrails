@@ -54,13 +54,14 @@ TOOL_NAME = "citecheck"
 
 DEFAULT_EMAIL = os.environ.get("CITECHECK_EMAIL", "").strip()
 NCBI_API_KEY = os.environ.get("NCBI_API_KEY", "").strip()
+OPENALEX_API_KEY = os.environ.get("OPENALEX_API_KEY", "").strip()
 
 TITLE_MATCH = 0.92      # >= this: titles agree
 TITLE_WARN = 0.80       # between WARN and MATCH: warning; below WARN: major mismatch
 YEAR_WARN = 1           # |cited - source| <= 1 -> warning (online-first vs print); > 1 -> major
 
-ALL_SOURCES = ("crossref", "pubmed", "openalex", "europepmc", "semanticscholar")
-DEFAULT_SOURCES = ("crossref", "pubmed", "openalex", "europepmc")
+ALL_SOURCES = ("crossref", "pubmed", "openalex", "europepmc", "datacite", "semanticscholar")
+DEFAULT_SOURCES = ("crossref", "pubmed", "openalex", "europepmc", "datacite")
 
 # Minimum seconds between calls to one host (polite defaults; NCBI allows 3/s without a key).
 HOST_INTERVAL = {
@@ -70,6 +71,7 @@ HOST_INTERVAL = {
     "api.openalex.org": 0.12,
     "www.ebi.ac.uk": 0.25,
     "api.semanticscholar.org": 1.2,
+    "api.datacite.org": 0.25,
     "doi.org": 0.25,
 }
 
@@ -88,11 +90,19 @@ PREPRINT_PREFIXES = {
 NAME_PARTICLES = {"von", "van", "de", "del", "della", "dos", "da", "le", "la", "du", "den", "der", "ten", "di", "al", "el", "bin", "ibn", "mac", "mc"}
 JOURNAL_STOP = {"the", "of", "and", "for", "in", "on", "a", "an", "&", "de", "la", "der", "le", "et"}
 
-DOI_RE = re.compile(r"10\.\d{4,9}/[^\s\"'<>\]\[{}]+", re.I)
-PMID_RE = re.compile(r"\bPMID\s*:?\s*(\d{5,9})\b", re.I)
+# Wiley SICI DOIs legitimately contain '<' and '>' (10.1002/(SICI)1097-0258(19980430)17:8<857::AID-SIM777>3.0.CO;2-E)
+DOI_RE = re.compile(r"10\.\d{4,9}/(?:\(SICI\)[^\s\"']+|[^\s\"'<>\]\[{}]+)", re.I)
+PMID_RE = re.compile(r"\b(?:PMID|PubMed\s+ID)\s*:?\s*(\d{5,9})\b", re.I)
+PUBMED_URL_RE = re.compile(r"(?:pubmed\.ncbi\.nlm\.nih\.gov|ncbi\.nlm\.nih\.gov/pubmed)/(\d{5,9})", re.I)
 PMCID_RE = re.compile(r"\b(PMC\d{5,9})\b", re.I)
-YEAR_RE = re.compile(r"\b(19[5-9]\d|20[0-4]\d)\b")
+YEAR_RE = re.compile(r"\b(19\d{2}|20[0-4]\d)\b")
 URL_RE = re.compile(r"https?://\S+", re.I)
+# Publisher label on a retracted/withdrawn article's title (uppercase + separator; a paper ABOUT retractions does not match)
+RETRACTED_LABEL_RE = re.compile(r"^\s*(?:RETRACTED|WITHDRAWN)(?:\s+ARTICLE)?\s*[:\-–]")
+# A record that IS a notice (erratum, correction, retraction notice ...) rather than the article
+NOTICE_PREFIX_RE = re.compile(
+    r"^\s*(?:correction|corrigendum|erratum|errata|author correction|publisher correction|retraction(?:\s+notice|\s+note)?|"
+    r"notice of retraction|expression of concern|withdrawal notice|retracted article)\b\s*(?:to|for|of)?\s*[:\-–]", re.I)
 
 
 def utcnow() -> str:
@@ -130,6 +140,14 @@ class Ref:
     style_guess: str = ""
     parse_confidence: str = "low"   # high (identifiers), medium (title+author+year), low
     key: str = ""                   # bibtex key / RIS id / numeric label if any
+    author_parse_failed: bool = False   # the citation carried an author block the parser could not read
+    extra_dois: list[str] = field(default_factory=list)   # further DOIs found in the same item (supplements, errata)
+    is_web_resource: bool = False   # URL-only / organisation web page: not a journal article
+    parse_notes: list[str] = field(default_factory=list)
+
+
+class InputError(Exception):
+    """A problem with the input file that the user must fix (exit code 2)."""
 
 
 @dataclass
@@ -163,7 +181,11 @@ class Hit:
     preprint: bool = False
     preprint_server: str = ""
     vor_doi: str = ""
+    notice_type: str = ""      # this record IS a correction/erratum/retraction notice, not the article
+    notice_for: str = ""       # DOI of the article the notice refers to, when known
+    weak_retraction: bool = False   # a hint (CrossRef update-to) that needs corroboration
     abstract: str = ""
+    licence: str = ""
     retrieved: str = ""
     candidates: list[dict] = field(default_factory=list)   # for title searches
 
@@ -224,8 +246,10 @@ def title_similarity(a: str, b: str) -> float:
         return 0.0
     ratio = difflib.SequenceMatcher(None, na, nb).ratio()
     short, long_ = (na, nb) if len(na) <= len(nb) else (nb, na)
-    # Cited titles often drop a subtitle; treat clean containment as a near-match.
-    if len(short) >= 25 and short in long_ and len(short) / len(long_) >= 0.55:
+    long_raw = b if len(na) <= len(nb) else a
+    # Cited titles often drop a subtitle; treat clean containment as a near-match, unless the longer
+    # title is a notice ("Correction to: <article title>") -- that is a different record, not a subtitle.
+    if len(short) >= 25 and short in long_ and len(short) / len(long_) >= 0.55 and not NOTICE_PREFIX_RE.match(long_raw or ""):
         ratio = max(ratio, 0.93)
     # ... or cite exactly the main title of a 'Main title: subtitle' record
     for x, y in ((a, b), (b, a)):
@@ -256,6 +280,8 @@ def surname_from_display(name: str) -> str:
     if "," in name:                       # 'Nidorf, Stefan M' / 'Nidorf, S. M.'
         return name.split(",", 1)[0].strip()
     toks = name.split()
+    while len(toks) >= 2 and re.fullmatch(r"(?:Jr|Sr|II|III|IV|2nd|3rd|4th)\.?", toks[-1]):   # 'Smith AB Jr', 'Stokes J 3rd'
+        toks.pop()
     # Trailing initials block (PubMed style 'Nidorf SM', 'Fiolet ATL')
     if len(toks) >= 2 and re.fullmatch(r"[A-Z]{1,4}\.?", toks[-1]) and not re.fullmatch(r"[A-Z]{1,4}\.?", toks[0]):
         core = toks[:-1]
@@ -295,31 +321,23 @@ def norm_journal_tokens(s: str) -> list[str]:
 
 
 def journals_match(cited: str, candidates: list[str]) -> bool:
+    """'N Engl J Med' == 'The New England journal of medicine'; 'BMJ' != 'BMJ Open'; 'Lancet' != 'Lancet Digital Health'."""
     ct = norm_journal_tokens(cited)
     if not ct:
         return True
+
+    def abbrev_of(short: list[str], full: list[str]) -> bool:
+        # one-to-one: same number of (non-stopword) tokens, each abbreviated token a prefix of its counterpart
+        return len(short) == len(full) and all(f.startswith(s) or s.startswith(f) for s, f in zip(short, full))
+
     for cand in candidates:
         kt = norm_journal_tokens(cand)
         if not kt:
             continue
-        if ct == kt:
-            return True
-        # abbreviation vs full name: each abbreviated token is a prefix of the matching full token
-        def abbrev_of(short: list[str], full: list[str]) -> bool:
-            if len(short) > len(full):
-                return False
-            j = 0
-            for tok in short:
-                while j < len(full) and not full[j].startswith(tok):
-                    j += 1
-                if j >= len(full):
-                    return False
-                j += 1
-            return True
-        if abbrev_of(ct, kt) or abbrev_of(kt, ct):
+        if ct == kt or abbrev_of(ct, kt):
             return True
         a, b = set(ct), set(kt)
-        if len(a & b) / len(a | b) >= 0.6:
+        if min(len(a), len(b)) >= 2 and len(a & b) / len(a | b) >= 0.6:
             return True
     return False
 
@@ -327,7 +345,9 @@ def journals_match(cited: str, candidates: list[str]) -> bool:
 def clean_doi(doi: str) -> str:
     d = (doi or "").strip()
     d = re.sub(r"^(https?://(dx\.)?doi\.org/|doi:\s*)", "", d, flags=re.I)
-    d = d.rstrip(".,;:)]}>\"'")
+    d = re.split(r"[?#&]", d, maxsplit=1)[0]              # a DOI copied from a URL keeps ?query=... or #fragment
+    d = re.sub(r"/(?:full|abstract|pdf|epdf|fulltext|html|summary)$", "", d, flags=re.I)
+    d = d.rstrip(".,;:)]}\"'")
     while d.endswith(")") and d.count("(") < d.count(")"):
         d = d[:-1]
     return d.lower()
@@ -346,23 +366,81 @@ def year_int(y: str) -> Optional[int]:
 # Parsers
 # --------------------------------------------------------------------------------------
 
+_W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+
+
 def read_docx_text(path: Path) -> str:
-    with zipfile.ZipFile(path) as zf:
-        xml = zf.read("word/document.xml")
-    root = ET.fromstring(xml)
-    ns = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
-    out = []
+    """Word paragraphs, one per block (blank line between). Word's automatic list numbering (w:numPr) is
+    not stored as text, so numbered paragraphs get a synthetic 'N. ' label; superscript runs that are
+    digits become ^n^ so citation markers survive."""
+    try:
+        with zipfile.ZipFile(path) as zf:
+            try:
+                info = zf.getinfo("word/document.xml")
+            except KeyError:
+                raise InputError(f"{path.name} is not a Word document (no word/document.xml inside)")
+            if info.file_size > 60_000_000 or info.file_size / max(info.compress_size, 1) > 250:
+                raise InputError(f"{path.name}: document.xml is suspiciously large ({info.file_size:,} bytes); refusing to parse")
+            xml = zf.read("word/document.xml")
+    except zipfile.BadZipFile:
+        raise InputError(f"{path.name} is not a valid .docx file (not a zip archive). Re-save it from Word as .docx, or export the reference list to .txt")
+    try:
+        root = ET.fromstring(xml)
+    except ET.ParseError as exc:
+        raise InputError(f"{path.name}: cannot parse document.xml ({exc})")
+    ns = {"w": _W_NS}
+    out: list[str] = []
+    counter = 0
     for p in root.findall(".//w:p", ns):
-        parts = [t.text or "" for t in p.findall(".//w:t", ns)]
-        if parts:
-            out.append("".join(parts))
-    return "\n".join(out)
+        numbered = p.find("w:pPr/w:numPr", ns) is not None
+        pieces: list[str] = []
+        for r in p.findall(".//w:r", ns):
+            txt = "".join(t.text or "" for t in r.findall("w:t", ns))
+            if not txt:
+                continue
+            va = r.find("w:rPr/w:vertAlign", ns)
+            if va is not None and va.get(f"{{{_W_NS}}}val") == "superscript" and re.fullmatch(r"[\d,\-–\s]+", txt):
+                pieces.append(f"^{txt.strip()}^")
+            else:
+                pieces.append(txt)
+        text = "".join(pieces).strip()
+        if not text:
+            continue
+        if numbered and not ITEM_START_RE.match(text):
+            counter += 1
+            text = f"{counter}. {text}"
+        elif not numbered:
+            counter = 0
+        out.append(text)
+    return "\n\n".join(out)
+
+
+BINARY_EXT = {".pdf": "PDF", ".doc": "legacy Word (.doc)", ".rtf": "RTF", ".odt": "OpenDocument", ".pages": "Pages", ".xlsx": "Excel", ".pptx": "PowerPoint"}
+
+
+def decode_bytes(raw: bytes, name: str = "") -> str:
+    """BOM-aware decoding: UTF-16 (Notepad/Word 'Unicode'), UTF-8 with or without BOM, then cp1252 (Word 'Plain text' on Windows)."""
+    if raw[:2] in (b"\xff\xfe", b"\xfe\xff"):
+        return raw.decode("utf-16", errors="replace")
+    if b"\x00" in raw[:4096]:
+        raise InputError(f"{name} does not look like a text file (binary content). Save the reference list as .txt, .docx, .bib or .ris")
+    try:
+        return raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        eprint(f"[citecheck] {name}: not UTF-8; decoding as Windows-1252")
+        return raw.decode("cp1252", errors="replace")
 
 
 def read_text(path: Path) -> str:
-    if path.suffix.lower() == ".docx":
+    ext = path.suffix.lower()
+    if ext in BINARY_EXT:
+        raise InputError(f"{BINARY_EXT[ext]} files cannot be read. In Word use File > Save As > Word Document (.docx), or copy the reference list into a .txt file and run verify on that")
+    if ext == ".docx":
         return read_docx_text(path)
-    return path.read_text(encoding="utf-8", errors="replace")
+    raw = path.read_bytes()
+    if raw[:5] == b"%PDF-":
+        raise InputError(f"{path.name} is a PDF. Export the manuscript or its reference list to .docx or .txt first")
+    return decode_bytes(raw, path.name)
 
 
 def detect_format(path: Path, override: str = "auto") -> str:
@@ -371,7 +449,7 @@ def detect_format(path: Path, override: str = "auto") -> str:
     ext = path.suffix.lower()
     return {
         ".bib": "bibtex", ".ris": "ris", ".json": "json", ".csv": "csv", ".tsv": "tsv",
-        ".docx": "text", ".md": "text", ".qmd": "text", ".rmd": "text", ".txt": "text", ".tex": "tex",
+        ".docx": "text", ".md": "text", ".qmd": "text", ".rmd": "text", ".txt": "text", ".tex": "tex", ".bbl": "tex",
     }.get(ext, "text")
 
 
@@ -430,13 +508,76 @@ def bib_author_surnames(author_field: str) -> list[str]:
     return out
 
 
+def _bib_entries(text: str) -> list[tuple[str, str, str]]:
+    """Brace-balanced scan: (type, body, raw) for every @type{...} or @type(...) entry, wherever the
+    closing brace sits (one-line entries from doi.org/CrossRef, '}}' endings, CRLF files)."""
+    out: list[tuple[str, str, str]] = []
+    start_re = re.compile(r"@(\w+)\s*([{(])")
+    pos, n = 0, len(text)
+    while True:
+        m = start_re.search(text, pos)
+        if not m:
+            break
+        close_ch = "}" if m.group(2) == "{" else ")"
+        j, brace, in_quote, end = m.end(), 0, False, None
+        while j < n:
+            ch = text[j]
+            if ch == '"' and brace == 0 and text[j - 1] != "\\":
+                in_quote = not in_quote
+            elif not in_quote:
+                if ch == "{":
+                    brace += 1
+                elif ch == "}":
+                    if brace == 0 and close_ch == "}":
+                        end = j
+                        break
+                    brace -= 1
+                elif ch == ")" and close_ch == ")" and brace == 0:
+                    end = j
+                    break
+            j += 1
+        if end is None:
+            break
+        out.append((m.group(1).lower(), text[m.end():end], text[m.start():end + 1]))
+        pos = end + 1
+    return out
+
+
+def _resolve_bib_macro(value: str, raw_value: str, macros: dict[str, str]) -> str:
+    """Substitute @string macros in bare values and '#'-concatenations."""
+    if "#" in raw_value or (raw_value.strip() and raw_value.strip()[0] not in "{\"" and not raw_value.strip().isdigit()):
+        parts = []
+        for piece in raw_value.split("#"):
+            piece = piece.strip()
+            if piece.startswith(("{", '"')):
+                parts.append(re.sub(r"^[{\"]|[}\"]$", "", piece))
+            else:
+                parts.append(macros.get(piece.lower(), piece))
+        return squash("".join(parts))
+    return value
+
+
 def parse_bibtex(text: str) -> list[Ref]:
     refs: list[Ref] = []
-    for m in re.finditer(r"@(\w+)\s*\{\s*([^,\s]+)\s*,(.*?)\n\}", text, flags=re.S):
-        etype, key, body = m.group(1).lower(), m.group(2), m.group(3)
-        if etype in {"comment", "preamble", "string"}:
+    macros: dict[str, str] = {}
+    for etype, body, raw in _bib_entries(text):
+        if etype in {"comment", "preamble"}:
             continue
+        if etype == "string":
+            sm = re.match(r"\s*([\w\-:]+)\s*=\s*(.*)$", body, flags=re.S)
+            if sm:
+                macros[sm.group(1).lower()] = squash(re.sub(r"^[{\"]|[}\"]$", "", sm.group(2).strip()))
+            continue
+        km = re.match(r"\s*([^,\s]+)\s*,", body)
+        if not km:
+            continue
+        key, body = km.group(1), body[km.end():]
         f = _bib_fields(body)
+        if macros:
+            for fname in ("journal", "journaltitle", "booktitle", "publisher"):
+                rm = re.search(r"\b" + fname + r"\s*=\s*([^,\n]+(?:\s*#\s*[^,\n]+)*)", body, flags=re.I)
+                if rm and fname in f:
+                    f[fname] = _resolve_bib_macro(f[fname], rm.group(1), macros)
         authors = bib_author_surnames(f.get("author", ""))
         doi = clean_doi(f.get("doi", "")) if f.get("doi") else ""
         pmid = re.sub(r"\D", "", f.get("pmid", "")) if f.get("pmid") else ""
@@ -447,7 +588,7 @@ def parse_bibtex(text: str) -> list[Ref]:
             pm = PMID_RE.search(f.get("note", "") + " " + f.get("annote", ""))
             pmid = pm.group(1) if pm else ""
         ref = Ref(
-            ref_id=key, key=key, raw=squash(m.group(0))[:600],
+            ref_id=key, key=key, raw=squash(raw)[:600],
             title=squash(f.get("title", "")), authors=authors, first_author=authors[0] if authors else "",
             year=(year_int(f.get("year", "")) and str(year_int(f.get("year", "")))) or "",
             journal=squash(f.get("journal") or f.get("journaltitle") or f.get("booktitle") or ""),
@@ -480,8 +621,11 @@ def parse_ris(text: str) -> list[Ref]:
                     doi = clean_doi(dm.group(0))
                     break
             pmid = ""
-            for cand in cur.get("AN", []) + cur.get("ID", []) + cur.get("N1", []):
-                pm = PMID_RE.search(cand) or re.fullmatch(r"(\d{5,9})", cand.strip())
+            # RIS 'ID' is the reference manager's record number, never a PMID. A bare number in AN
+            # is a PMID only when the record says it came from PubMed/MEDLINE.
+            from_pubmed = any(re.search(r"pubmed|medline|nlm", v, re.I) for v in cur.get("DB", []) + cur.get("DP", []))
+            for cand in cur.get("AN", []) + cur.get("N1", []) + cur.get("UR", []) + cur.get("L1", []):
+                pm = PMID_RE.search(cand) or PUBMED_URL_RE.search(cand) or (from_pubmed and re.fullmatch(r"(\d{5,9})", cand.strip()))
                 if pm:
                     pmid = pm.group(1)
                     break
@@ -511,29 +655,79 @@ def parse_ris(text: str) -> list[Ref]:
 
 
 def parse_json_refs(text: str) -> list[Ref]:
-    data = json.loads(text)
-    items = data.get("references") if isinstance(data, dict) else data
-    if isinstance(data, dict) and "records" in data and not items:
-        items = [r.get("cited", r) for r in data["records"]]
+    """Accepts a list of records, {"references": [...]}, a citecheck audit, or CSL-JSON (Zotero, Mendeley,
+    pandoc): keys are matched case-insensitively and CSL aliases (DOI, PMID, author[{family,given}],
+    issued.date-parts, container-title, page) are understood."""
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise InputError(f"not valid JSON: {exc}")
+    if isinstance(data, dict):
+        items = data.get("references") or data.get("items")
+        if items is None and isinstance(data.get("records"), list) and data.get("tool") == TOOL_NAME:
+            items = [r.get("cited", r) for r in data["records"]]
+        if items is None:
+            items = [data] if any(k.lower() in {"title", "doi", "pmid"} for k in data) else []
+    else:
+        items = data
+    if not isinstance(items, list):
+        raise InputError("JSON must be a list of reference objects, or an object with a 'references' list")
     refs: list[Ref] = []
-    for i, it in enumerate(items or [], 1):
+    for i, it in enumerate(items, 1):
         if isinstance(it, str):
             refs.append(parse_free_citation(it, f"ref_{i}"))
             continue
-        authors = it.get("authors") or []
-        if isinstance(authors, str):
-            authors = [a.strip() for a in re.split(r";|,\s*(?=[A-Z][a-z])| and ", authors) if a.strip()]
-        authors = [surname_from_display(a) if isinstance(a, str) else surname_from_display(a.get("family") or a.get("name") or "") for a in authors]
+        if not isinstance(it, dict):
+            continue
+        low = {str(k).lower().replace("_", "-"): v for k, v in it.items()}
+
+        def g(*names: str) -> Any:
+            for nme in names:
+                v = low.get(nme)
+                if v not in (None, "", [], {}):
+                    return v
+            return ""
+        authors_raw = g("authors", "author", "creators")
+        authors: list[str] = []
+        authors_full: list[str] = []
+        if isinstance(authors_raw, str):
+            authors_raw = [a.strip() for a in re.split(r";|\s+and\s+|,\s*(?=[A-Z][a-z]+(?:\s+[A-Z]{1,3})?\s*(?:,|$))", authors_raw) if a.strip()]
+        for a in authors_raw if isinstance(authors_raw, list) else []:
+            if isinstance(a, dict):
+                fam = a.get("family") or a.get("familyName") or a.get("last") or a.get("lastName") or ""
+                giv = a.get("given") or a.get("givenName") or a.get("first") or ""
+                lit = a.get("literal") or a.get("name") or ""
+                sn = squash(fam) or surname_from_display(lit)
+            else:
+                sn, giv = surname_from_display(str(a)), ""
+            if sn:
+                authors.append(sn)
+                authors_full.append(sn + (f", {squash(giv)}" if giv else ""))
+        year = ""
+        issued = g("issued", "date", "published", "year", "publication-year", "pubyear")
+        if isinstance(issued, dict):
+            parts = issued.get("date-parts") or [[]]
+            year = str(parts[0][0]) if parts and parts[0] else str(year_int(str(issued.get("raw") or issued.get("literal") or "")) or "")
+        else:
+            year = str(year_int(str(issued)) or "")
+        title = g("title")
+        if isinstance(title, list):
+            title = " ".join(str(t) for t in title)
+        doi_raw = g("doi")
         ref = Ref(
-            ref_id=str(it.get("id") or it.get("ref_id") or it.get("key") or f"ref_{i}"),
+            ref_id=str(g("id", "ref-id", "key", "citation-key") or f"ref_{i}"),
             raw=json.dumps(it, ensure_ascii=False)[:600],
-            title=squash(it.get("title", "")), authors=authors,
-            first_author=squash(it.get("first_author", "")) or (authors[0] if authors else ""),
-            year=str(year_int(str(it.get("year", ""))) or ""), journal=squash(it.get("journal", "")),
-            volume=str(it.get("volume", "")), issue=str(it.get("issue", "")), pages=str(it.get("pages", "")),
-            doi=clean_doi(it.get("doi", "")) if it.get("doi") else "", pmid=re.sub(r"\D", "", str(it.get("pmid", ""))),
-            pmcid=str(it.get("pmcid", "")), url=it.get("url", ""), style_guess="json",
+            title=squash(str(title)), authors=authors,
+            first_author=squash(str(g("first-author"))) or (authors[0] if authors else ""),
+            year=year, journal=squash(str(g("journal", "container-title", "container-title-short", "publicationtitle", "source"))),
+            volume=str(g("volume")), issue=str(g("issue", "number")), pages=str(g("pages", "page")),
+            doi=clean_doi(str(doi_raw)) if doi_raw else "", pmid=re.sub(r"\D", "", str(g("pmid", "pubmed-id", "pubmed"))),
+            pmcid=str(g("pmcid")), url=str(g("url")), style_guess="json",
         )
+        if not ref.doi and ref.url and DOI_RE.search(ref.url):
+            ref.doi = clean_doi(DOI_RE.search(ref.url).group(0))
+        if not ref.pmid and ref.url and PUBMED_URL_RE.search(ref.url):
+            ref.pmid = PUBMED_URL_RE.search(ref.url).group(1)
         ref.parse_confidence = "high" if (ref.doi or ref.pmid) else ("medium" if (ref.title and ref.year) else "low")
         refs.append(ref)
     return refs
@@ -543,7 +737,7 @@ def parse_delimited(text: str, delimiter: str) -> list[Ref]:
     rows = list(csv.DictReader(io.StringIO(text), delimiter=delimiter))
     refs: list[Ref] = []
     for i, row in enumerate(rows, 1):
-        low = {(k or "").strip().lower(): (v or "").strip() for k, v in row.items()}
+        low = {(k or "").strip().lstrip("﻿").lower(): (v or "").strip() for k, v in row.items()}
         authors_raw = low.get("authors") or low.get("author") or ""
         authors = [surname_from_display(a) for a in re.split(r";|\s+and\s+|,\s*(?=[A-Z][a-z]+\s+[A-Z]{1,3}\b)", authors_raw) if a.strip()] if authors_raw else []
         ref = Ref(
@@ -560,17 +754,55 @@ def parse_delimited(text: str, delimiter: str) -> list[Ref]:
     return refs
 
 
+def _detex(s: str) -> str:
+    s = s.replace("~", " ").replace("--", "-").replace("\\&", "&").replace("\\%", "%")
+    s = re.sub(r"\\['\"^`~=.uvHtcdbr]\s*\{?(\w)\}?", r"\1", s)          # accents: \'e -> e
+    s = re.sub(r"\{\\(?:em|it|bf|sc)\s+([^{}]*)\}", r"\1", s)            # {\em text}
+    s = re.sub(r"\\(?:emph|textit|textbf|textsc|url|href)\{([^{}]*)\}", r"\1", s)
+    s = re.sub(r"\\[A-Za-z]+\s*", " ", s)                              # remaining macros
+    return squash(s.replace("{", "").replace("}", ""))
+
+
 def parse_tex_bibitems(text: str) -> list[Ref]:
+    """\\bibitem entries, including BibTeX-generated .bbl output (display-order authors, \\newblock separators)."""
     refs = []
     for i, m in enumerate(re.finditer(r"\\bibitem(?:\[[^\]]*\])?\{([^}]+)\}(.*?)(?=\\bibitem|\\end\{thebibliography\}|\Z)", text, flags=re.S), 1):
-        key, body = m.group(1), squash(re.sub(r"\\(?:emph|textit|textbf|newblock)\b\{?", " ", m.group(2)).replace("}", " "))
-        ref = parse_free_citation(body, key)
-        ref.key = key
+        key, body = m.group(1), m.group(2)
+        blocks = [_detex(b) for b in re.split(r"\\newblock", body) if squash(_detex(b))]
+        if len(blocks) >= 3:
+            authors_blk, title_blk, rest = blocks[0], blocks[1], " ".join(blocks[2:])
+            ref = Ref(ref_id=key, key=key, raw=squash(_detex(body))[:600], style_guess="bbl")
+            for chunk in re.split(r",\s*|\s+and\s+|\s*&\s*", authors_blk.rstrip(" ."))[:200]:
+                chunk = chunk.strip(" .")
+                if chunk and not chunk.lower().startswith("et al") and chunk.lower() != "others":
+                    ref.authors.append(surname_from_display(chunk))
+            ref.authors = [a for a in ref.authors if a]
+            ref.first_author = ref.authors[0] if ref.authors else ""
+            ref.title = title_blk.rstrip(" .")
+            dm = DOI_RE.search(rest) or DOI_RE.search(body)
+            if dm:
+                ref.doi = clean_doi(dm.group(0))
+            ym = re.findall(r"\b(19\d{2}|20[0-4]\d)\b", rest)
+            ref.year = ym[-1] if ym else ""
+            jm = re.match(r"([^,0-9]+?)\s*,", rest)
+            ref.journal = jm.group(1).strip() if jm else ""
+            vm = re.search(r"(\d+)\s*(?:\((\w+)\))?\s*:\s*([\w\-–]+)", rest)
+            if vm:
+                ref.volume, ref.issue, ref.pages = vm.group(1), vm.group(2) or "", vm.group(3)
+            ref.parse_confidence = "high" if ref.doi else ("medium" if (ref.title and ref.year and ref.first_author) else "low")
+        else:
+            ref = parse_free_citation(" ".join(blocks) if blocks else _detex(body), key)
+            ref.key = key
         refs.append(ref)
     return refs
 
 
-REF_HEADING_RE = re.compile(r"(?im)^\s*(?:#+\s*)?(?:\d+\.?\s*)?(references|reference list|bibliography|works cited|literature cited)\s*:?\s*$")
+REF_HEADING_RE = re.compile(
+    r"(?im)^\s*(?:#+\s*)?(?:\*\*|__)?\s*(?:\d+\.?\s*)?"
+    r"(references?(?:\s+and\s+notes)?|reference list|bibliography|works cited|literature(?:\s+cited)?|sources|citations)"
+    r"\s*:?\s*(?:\*\*|__)?\s*$")
+# Where a reference list ends inside a manuscript: tables, figure legends, appendices (with or without '#')
+SECTION_END_RE = re.compile(r"(?im)^\s*(?:#+\s*)?(?:\*\*|__)?\s*(?:tables?|figures?|fig\.?|figure legends?|legends?|supplement\w*|appendi\w*|acknowledg\w*)\b")
 ITEM_START_RE = re.compile(r"^\s*(?:\[(\d{1,3})\]|(\d{1,3})[.)]|(\d{1,3})\s{2,}|[-*•]\s+)\s*")
 
 
@@ -579,13 +811,19 @@ def reference_section(text: str) -> str:
     if not m:
         return text
     tail = text[m.end():]
-    # stop at the next top-level heading that looks like a non-reference section
-    stop = re.search(r"(?im)^\s*#+\s*(appendix|supplement|tables?|figures?|acknowledg)", tail)
+    # stop at the next section that is not part of the list (tables, figure legends, appendix ...)
+    stop = SECTION_END_RE.search(tail)
     return tail[:stop.start()] if stop else tail
 
 
 def looks_like_citation(txt: str) -> bool:
-    return bool(DOI_RE.search(txt) or PMID_RE.search(txt) or AUTHOR_LIST_VANCOUVER.match(txt) or APA_YEAR_RE.search(txt))
+    """A citation START: identifiers, or an anchored author list. A '(2021)' somewhere inside a body
+    sentence is not enough -- that would send manuscript prose to the search APIs."""
+    t = squash(txt)
+    t = re.sub(r"^\s*(?:\[\d{1,3}\]|\d{1,3}[.)])\s*", "", t)
+    return bool(DOI_RE.search(t) or PMID_RE.search(t) or PUBMED_URL_RE.search(t)
+                or AUTHOR_LIST_VANCOUVER.match(t) or APA_START_RE.match(t)
+                or re.match(r"^[A-Z][\w&'’\- ]{3,120}?(?:Group|Investigators|Committee|Collaborat\w+|Consortium|Organization|Organisation|Society|Association|Institute|College|Agency)\b", t))
 
 
 def split_reference_items(section: str, strict: bool = False) -> list[tuple[str, str]]:
@@ -595,53 +833,82 @@ def split_reference_items(section: str, strict: bool = False) -> list[tuple[str,
     lines = [ln.rstrip() for ln in section.splitlines()]
     items: list[tuple[str, str]] = []
     cur_label, cur = "", ""
-    numbered = sum(1 for ln in lines if ITEM_START_RE.match(ln) and ln.strip()) >= 2
+    nonempty = [ln for ln in lines if ln.strip()]
+    numbered = sum(1 for ln in nonempty if ITEM_START_RE.match(ln)) >= 2
     if numbered:
+        prev_blank = False
         for ln in lines:
             if not ln.strip():
+                prev_blank = True
                 continue
             m = ITEM_START_RE.match(ln)
-            if m:
+            # an unnumbered paragraph that itself starts like a citation is its own item, not a continuation
+            if m or (prev_blank and cur and looks_like_citation(ln) and _item_complete(cur)):
                 if cur:
                     items.append((cur_label, squash(cur)))
-                cur_label = next((g for g in m.groups() if g), "") or ""
-                cur = ln[m.end():]
+                cur_label = (next((g for g in m.groups() if g), "") or "") if m else ""
+                cur = ln[m.end():] if m else ln.strip()
             else:
                 cur = (cur + " " + ln.strip()) if cur else ln.strip()
+            prev_blank = False
         if cur:
             items.append((cur_label, squash(cur)))
     else:
-        # paragraph-separated
-        para = []
-        for ln in lines + [""]:
-            if ln.strip():
-                para.append(ln.strip())
-            elif para:
-                items.append(("", squash(" ".join(para))))
-                para = []
+        # One reference per line (PubMed 'Cite', APA lists, Word paragraphs) is the commonest shape:
+        # split per line when most lines start like a citation; otherwise fall back to blank-line paragraphs.
+        starts = sum(1 for ln in nonempty if looks_like_citation(ln))
+        if len(nonempty) >= 2 and starts >= max(2, int(0.6 * len(nonempty))):
+            for ln in nonempty:
+                if looks_like_citation(ln) or not items:
+                    items.append(("", squash(ln)))
+                else:   # continuation of a wrapped reference
+                    lbl, prev = items[-1]
+                    items[-1] = (lbl, squash(prev + " " + ln))
+        else:
+            para: list[str] = []
+            for ln in lines + [""]:
+                if ln.strip():
+                    para.append(ln.strip())
+                elif para:
+                    items.append(("", squash(" ".join(para))))
+                    para = []
     # keep only things that look like references
     good = []
     for label, txt in items:
-        if len(txt) < 25:
+        if len(txt) < 25 and not URL_RE.search(txt):
             continue
         if strict:
-            if looks_like_citation(txt):
+            if looks_like_citation(txt) or label:
                 good.append((label, txt))
-        elif DOI_RE.search(txt) or PMID_RE.search(txt) or YEAR_RE.search(txt) or len(txt.split()) >= 8:
+        elif DOI_RE.search(txt) or PMID_RE.search(txt) or YEAR_RE.search(txt) or URL_RE.search(txt) or len(txt.split()) >= 8:
             good.append((label, txt))
     return good
 
 
+def _item_complete(txt: str) -> bool:
+    """Does an accumulated item already look like a whole reference (ends in year/pages/DOI/URL)?"""
+    t = txt.rstrip(" .")
+    return bool(DOI_RE.search(t) or URL_RE.search(t) or re.search(r"(?:19|20)\d{2}\s*(?:;[\d\w()\s:,\-–]*)?$", t) or re.search(r"\d+\s*[\-–]\s*\d+$|\(\d{4}\)", t))
+
+
+_UC = "A-ZÀ-ÖØ-Þ"      # uppercase Latin letters including Ö, Ø, Ç, É ...
+_LC = "a-zß-öø-ÿ"
 _PARTICLES_RE = r"(?:(?:[Vv]an|[Vv]on|[Dd]e|[Dd]er|[Dd]en|[Dd]el|[Dd]ella|[Dd]a|[Dd]i|[Ll]a|[Ll]e|[Dd]u|[Tt]en|[Tt]er|[Dd]os|[Dd]as|[Ee]l|[Aa]l|[Bb]in|[Ii]bn|[Mm]ac)\s)*"
-_SURNAME_RE = r"[A-Z][\w'’\-]+(?:\s[A-Z][\w'’\-]+)?"
-_INITIALS_RE = r"(?:[A-Z]{1,3}(?:-[A-Z])?|[A-Z]\.(?:\s?-?[A-Z]\.)*)"
-_AUTHOR_ONE = _PARTICLES_RE + _SURNAME_RE + r"\s" + _INITIALS_RE
+# A surname must contain a lowercase letter, so an all-caps word (a shouted title, a block of initials) can
+# never be read as a surname. That keeps the author-list regex linear on adversarial input.
+_SURNAME_RE = rf"[{_UC}][{_UC}{_LC}'’\-]*[{_LC}][{_UC}{_LC}'’\-]*(?:\s[{_UC}][{_UC}{_LC}'’\-]*[{_LC}][{_UC}{_LC}'’\-]*)?"
+_INITIALS_RE = r"(?:[A-Z]{1,3}(?:-[A-Z])?\b\.?|[A-Z]\.(?:\s?-?[A-Z]\.)*)"
+_SUFFIX_RE = r"(?:\s(?:Jr|Sr|II|III|IV|2nd|3rd|4th)\b\.?)?"
+_AUTHOR_ONE = _PARTICLES_RE + _SURNAME_RE + r"\s" + _INITIALS_RE + _SUFFIX_RE
+_SEP_RE = r"(?:,\s*|;\s*|\s*&\s*|\s+and\s+)"
 AUTHOR_LIST_VANCOUVER = re.compile(
-    r"^(?P<authors>(?:" + _AUTHOR_ONE + r"(?:,\s*|;\s*|\s*&\s*|\s+and\s+)?)+"
+    r"^(?P<authors>" + _AUTHOR_ONE + r"(?:" + _SEP_RE + _AUTHOR_ONE + r"){0,80}"
     r"(?:,?\s*(?:et\s+al\.?|and\s+others|\.{3}))?"
-    r"(?:,?\s*(?:for\s+the\s+|on\s+behalf\s+of\s+the\s+)?[A-Z][\w'’\-\s]+(?:Group|Investigators|Committee|Collaborat\w+|Consortium|Study|Network|Team)\b\.?)?)"
+    r"(?:,?\s*(?:for\s+the\s+|on\s+behalf\s+of\s+the\s+)?[A-Z][\w'’\-\s]{2,80}?(?:Group|Investigators|Committee|Collaborat\w+|Consortium|Study|Network|Team)\b\.?)?)"
     r"(?:\s*[.;]|(?<=\.))\s+(?P<rest>.*)$"
 )
+# APA reference start: 'Nidorf, S. M.,' / 'van der Meer, P.' -- anchored, used to recognise citation starts
+APA_START_RE = re.compile(rf"^{_PARTICLES_RE}[{_UC}][{_UC}{_LC}'’\-]+,\s+[A-Z]\.?(?:\s?-?[A-Z]\.?)*,?")
 # A publication-year tail: '. 2020;383(19):1838-1847', ' 2021;372:n71', '. 2019 May 15;73(21):2756', '. 2020.'
 YEAR_TAIL_VANCOUVER = re.compile(
     r"(?<![\w\-])(?P<year>(?:19|20)\d{2})\s*(?:[A-Z][a-z]{2}\.?(?:\s\d{1,2})?(?:-[A-Z][a-z]{2})?)?"
@@ -655,10 +922,14 @@ def parse_free_citation(raw: str, ref_id: str) -> Ref:
     """Heuristic parser for Vancouver / AMA / APA style strings."""
     text = squash(html.unescape(raw))
     ref = Ref(ref_id=ref_id, raw=text[:600])
-    dm = DOI_RE.search(text)
-    if dm:
-        ref.doi = clean_doi(dm.group(0))
-    pm = PMID_RE.search(text)
+    # all DOIs in the item; prefer one introduced by 'doi:' or doi.org over one buried in a publisher URL
+    dois = [clean_doi(x.group(0)) for x in DOI_RE.finditer(text)]
+    dois = [d for d in dict.fromkeys(dois) if d]
+    if dois:
+        explicit = re.search(r"(?:doi\s*:?\s*|doi\.org/)(" + DOI_RE.pattern + r")", text, flags=re.I)
+        ref.doi = clean_doi(explicit.group(1)) if explicit else dois[0]
+        ref.extra_dois = [d for d in dois if d != ref.doi]
+    pm = PMID_RE.search(text) or PUBMED_URL_RE.search(text)
     if pm:
         ref.pmid = pm.group(1)
     pc = PMCID_RE.search(text)
@@ -677,6 +948,7 @@ def parse_free_citation(raw: str, ref_id: str) -> Ref:
     body = re.sub(r"\b(?:Available|Accessed|Retrieved|Epub)\b.*$", " ", body, flags=re.I)
     body = re.sub(r"\[\s*(?:Internet|published online[^\]]*|Epub[^\]]*)\s*\]", " ", body, flags=re.I)
     body = squash(body.replace("*", "").replace("_", " ")).strip(" .;,")
+    body = re.sub(r"^\s*(?:et\s+al\.?|\.{3})\s*", "", body)      # a list that starts with 'et al.' has lost its authors
 
     apa = APA_YEAR_RE.search(body)
     if apa and apa.start() < len(body) * 0.6:
@@ -707,7 +979,11 @@ def parse_free_citation(raw: str, ref_id: str) -> Ref:
     else:
         ref.style_guess = "vancouver"
         m = AUTHOR_LIST_VANCOUVER.match(body)
-        if m:
+        gm = None if m else re.match(r"^(?P<group>[A-Z][\w&'’\- ]{3,120}?(?:Group|Investigators|Committee|Collaborat\w+|Consortium|Organization|Organisation|Society|Association|Institute|College|Agency|Excellence)\b\.?)\s*[.;]?\s+(?P<rest>[A-Z].*)$", body)
+        if gm:                                   # organisation or trial group as the author
+            ref.authors = [gm.group("group").rstrip(" .")]
+            rest = gm.group("rest")
+        elif m:
             authors_part, rest = m.group("authors"), m.group("rest")
             for chunk in re.split(r",\s*|;\s*|\s+and\s+|\s*&\s*", authors_part):
                 chunk = chunk.strip(" .")
@@ -716,6 +992,11 @@ def parse_free_citation(raw: str, ref_id: str) -> Ref:
                 ref.authors.append(surname_from_display(chunk))
         else:
             rest = body
+            # a leading segment with commas/initials that the author regex rejected (all caps, odd characters):
+            # remember that an author block existed so the verifier does not quietly skip the author check
+            lead = body.split(". ", 1)[0]
+            if len(lead) <= 250 and (re.search(r"\b[A-Z]{1,3}\b", lead) and ("," in lead or " and " in lead)) and not DOI_RE.search(lead):
+                ref.author_parse_failed = True
         # The publication year sits after the journal: take the LAST year-tail whose preceding text is a
         # sentence boundary, so a year inside the title ("The PRISMA 2020 statement") is not mistaken for it.
         tail = None
@@ -754,6 +1035,10 @@ def parse_free_citation(raw: str, ref_id: str) -> Ref:
     ref.authors = [a for a in ref.authors if a]
     ref.first_author = ref.authors[0] if ref.authors else ""
     ref.title = squash(strip_tags(ref.title)).strip("\"'“”")
+    # Web pages and organisation documents (WHO fact sheet, guideline landing page): URL, no identifiers,
+    # no journal. These are not journal articles and must not be matched to one by title.
+    if ref.url and not ref.doi and not ref.pmid and not ref.journal and not PUBMED_URL_RE.search(ref.url) and "doi.org" not in ref.url.lower():
+        ref.is_web_resource = True
     if ref.doi or ref.pmid:
         ref.parse_confidence = "high"
     elif ref.title and ref.year and ref.first_author:
@@ -770,9 +1055,20 @@ def parse_reference_list(text: str) -> list[Ref]:
     if not items and has_heading:
         items = split_reference_items(text, strict=True)
     refs = []
+    used: dict[str, int] = {}
     for i, (label, txt) in enumerate(items, 1):
         rid = f"ref_{label}" if label else f"ref_{i}"
-        refs.append(parse_free_citation(txt, rid))
+        if rid in used:                      # duplicate labels must not collide (evidence/claims map by ref_id)
+            used[rid] += 1
+            rid = f"{rid}_{used[rid]}"
+        else:
+            used[rid] = 1
+        ref = parse_free_citation(txt, rid)
+        # an item holding two DOIs or two year-tails is usually two references merged by the splitter
+        tails = len(re.findall(r"(?:19|20)\d{2}\s*;\s*\d", txt)) + len(APA_YEAR_RE.findall(txt))
+        if len(ref.extra_dois) >= 1 and tails >= 2 or tails >= 3 or len(txt) > 700:
+            ref.parse_notes.append("this item may contain more than one reference merged together; check the list formatting (one reference per line or per numbered item)")
+        refs.append(ref)
     return refs
 
 
@@ -820,6 +1116,8 @@ def refs_from_ids(ids: list[str]) -> list[Ref]:
 # --------------------------------------------------------------------------------------
 
 class Http:
+    NEGATIVE_TTL = 24 * 3600     # 'not found' answers go stale faster: new DOIs, new retractions
+
     def __init__(self, email: str = "", timeout: int = 20, cache_path: Optional[Path] = None, ttl_days: int = 7, quiet: bool = False):
         self.email = email or DEFAULT_EMAIL
         self.timeout = timeout
@@ -827,19 +1125,33 @@ class Http:
         self.ttl = ttl_days * 86400
         self.quiet = quiet
         self.last_call: dict[str, float] = {}
+        self.intervals = dict(HOST_INTERVAL)
+        if not self.email:
+            self.intervals["api.crossref.org"] = 0.25   # CrossRef public pool is 5 requests/s; the polite pool needs a mailto
         self.cache: dict[str, dict] = {}
-        self.calls = 0
+        self.calls = 0            # HTTP attempts, including retries
+        self.gets = 0             # completed get() requests (cache hits excluded)
         self.cache_hits = 0
+        self.transport_failures = 0
         if cache_path and cache_path.exists():
             try:
-                self.cache = json.loads(cache_path.read_text(encoding="utf-8"))
+                loaded = json.loads(cache_path.read_text(encoding="utf-8"))
             except Exception:
-                self.cache = {}
+                loaded = {}
+            now = time.time()
+            for k, ent in (loaded.items() if isinstance(loaded, dict) else []):
+                if not isinstance(ent, dict) or not isinstance(ent.get("ts"), (int, float)) or ent["ts"] > now + 300:
+                    continue   # malformed or future-dated entries are not trusted
+                ent["final_url"] = redact_url(ent.get("final_url", ""))   # scrub caches written by older versions
+                self.cache[redact_url(k)] = ent
 
-    @property
-    def user_agent(self) -> str:
-        contact = f"mailto:{self.email}" if self.email else "no-contact-email-set"
-        return f"{TOOL_NAME}/{__version__} (https://github.com/TW5897/citation-guardrails; {contact})"
+    def user_agent_for(self, host: str) -> str:
+        """The contact address goes only to CrossRef, which reads it from the User-Agent. NCBI and OpenAlex
+        receive it as a query parameter; every other host (doi.org, Europe PMC, publishers) gets none."""
+        base = f"{TOOL_NAME}/{__version__} (https://github.com/TW5897/citation-guardrails)"
+        if host == "api.crossref.org" and self.email:
+            return f"{base[:-1]}; mailto:{self.email})"
+        return base
 
     def save_cache(self) -> None:
         if not self.cache_path:
@@ -852,40 +1164,47 @@ class Http:
                 eprint(f"[citecheck] cache not saved: {exc}")
 
     def _throttle(self, host: str) -> None:
-        gap = HOST_INTERVAL.get(host, 0.3)
+        gap = self.intervals.get(host, 0.3)
         last = self.last_call.get(host, 0.0)
         wait = gap - (time.monotonic() - last)
         if wait > 0:
             time.sleep(wait)
         self.last_call[host] = time.monotonic()
 
-    def get(self, url: str, method: str = "GET", accept: str = "") -> tuple[int, str, str]:
-        """Returns (status, body, final_url). status 0 = transport failure. Caches 200/404."""
-        key = f"{method} {redact_url(url)}"   # the cache file may be shared: keep emails and keys out of it
+    def get(self, url: str, method: str = "GET", accept: str = "", follow_redirects: bool = True, use_cache: bool = True) -> tuple[int, str, str]:
+        """Returns (status, body, final_url). status 0 = transport failure; 3xx is returned as-is when
+        follow_redirects is False (final_url then holds the Location header, which is never fetched).
+        Caches 200 for ttl days and 404/410 for 24 h. Cached URLs are redacted (no email, no key)."""
+        key = f"{method} {redact_url(url)}"
         now = time.time()
-        ent = self.cache.get(key)
-        if ent and now - ent.get("ts", 0) < self.ttl:
-            self.cache_hits += 1
-            return ent["status"], ent.get("body", ""), ent.get("final_url", url)
+        ent = self.cache.get(key) if use_cache else None
+        if ent:
+            age = now - ent.get("ts", 0)
+            ttl = self.NEGATIVE_TTL if ent.get("status") in (404, 410) else self.ttl
+            if 0 <= age < ttl:
+                self.cache_hits += 1
+                return ent["status"], ent.get("body", ""), ent.get("final_url", redact_url(url))
         host = urllib.parse.urlparse(url).netloc
-        headers = {"User-Agent": self.user_agent}
+        headers = {"User-Agent": self.user_agent_for(host)}
         if accept:
             headers["Accept"] = accept
+        opener = urllib.request.build_opener() if follow_redirects else urllib.request.build_opener(_NoRedirect)
         delay = 1.0
-        status, body, final_url = 0, "", url
+        status, body, final_url = 0, "", redact_url(url)
         for attempt in range(4):
             self._throttle(host)
             self.calls += 1
             req = urllib.request.Request(url, headers=headers, method=method)
             try:
-                with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+                with opener.open(req, timeout=self.timeout) as resp:
                     status = resp.status
-                    final_url = resp.geturl()
+                    final_url = redact_url(resp.geturl())
                     body = "" if method == "HEAD" else resp.read().decode("utf-8", "replace")
                 break
             except urllib.error.HTTPError as e:
                 status = e.code
-                final_url = e.geturl() or url
+                loc = e.headers.get("Location") if e.headers else None
+                final_url = redact_url(loc or e.geturl() or url)
                 if status in (429, 500, 502, 503, 504) and attempt < 3:
                     ra = e.headers.get("Retry-After") if e.headers else None
                     try:
@@ -902,13 +1221,15 @@ class Http:
                 break
             except (urllib.error.URLError, TimeoutError, OSError) as e:
                 status, body = 0, str(e)
-                if attempt < 3:
+                if attempt < 1:            # one retry for transport failures; a dead network should fail fast
                     time.sleep(delay)
-                    delay *= 2
                     continue
                 break
-        if status in (200, 404, 410):
-            self.cache[key] = {"status": status, "body": body, "final_url": final_url, "ts": now}
+        self.gets += 1
+        if status == 0:
+            self.transport_failures += 1
+        if use_cache and status in (200, 404, 410) and len(body) < 2_000_000:
+            self.cache[key] = {"status": status, "body": body, "final_url": final_url, "ts": now, "v": __version__}
         return status, body, final_url
 
     def get_json(self, url: str) -> tuple[int, Any]:
@@ -919,6 +1240,21 @@ class Http:
             return status, json.loads(body)
         except json.JSONDecodeError:
             return status, None
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # type: ignore[override]
+        return None
+
+
+def openalex_params(http: Http) -> str:
+    """mailto / api_key query suffix for OpenAlex ('&k=v' pairs, without the leading '?' or '&')."""
+    parts = []
+    if http.email:
+        parts.append("mailto=" + urllib.parse.quote(http.email))
+    if OPENALEX_API_KEY:
+        parts.append("api_key=" + urllib.parse.quote(OPENALEX_API_KEY))
+    return "&".join(parts)
 
 
 def ncbi_params(http: Http, **kw: str) -> str:
@@ -985,31 +1321,41 @@ def crossref_by_doi(http: Http, doi: str) -> Hit:
     h.work_type = m.get("type") or ""
     if m.get("abstract"):
         h.abstract = squash(strip_tags(html.unescape(m["abstract"])))
-    for u in m.get("update-to") or []:
-        t = (u.get("type") or "").lower()
-        label = f"{u.get('label') or t} (CrossRef update-to, DOI {u.get('DOI')})"
-        if t in ("retraction", "withdrawal", "removal"):
-            h.retracted = True
-            h.retraction_notes.append(label)
-        elif "concern" in t:
-            h.concern = True
-            h.retraction_notes.append(label)
-        elif t in ("correction", "erratum", "corrigendum"):
-            h.correction = True
+    # 'updated-by' = notices that update THIS work (the authoritative direction; Retraction Watch entries live here).
     for u in m.get("updated-by") or []:
         t = (u.get("type") or "").lower()
-        label = f"{u.get('label') or t} (CrossRef updated-by, DOI {u.get('DOI')})"
+        src = u.get("source") or "publisher"
+        label = f"{u.get('label') or t} (CrossRef updated-by, source {src}, DOI {u.get('DOI')})"
         if t in ("retraction", "withdrawal", "removal"):
             h.retracted = True
             h.retraction_notes.append(label)
         elif "concern" in t:
             h.concern = True
             h.retraction_notes.append(label)
-        elif t in ("correction", "erratum", "corrigendum"):
+        elif t in ("correction", "erratum", "corrigendum", "new_edition"):
             h.correction = True
-    if re.match(r"^\s*(retracted|withdrawn)\b", h.title, flags=re.I):
+    # 'update-to' = this record updates another work, i.e. it is itself a notice... except that some
+    # publishers deposit it on the retracted article. Decide from the title: a notice title says so.
+    update_to = m.get("update-to") or []
+    is_notice_title = bool(NOTICE_PREFIX_RE.match(h.title))
+    if update_to and (is_notice_title or h.work_type in ("journal-article",) and not RETRACTED_LABEL_RE.match(h.title) and all((u.get("type") or "").lower() in ("correction", "erratum", "corrigendum") for u in update_to)):
+        if is_notice_title or not RETRACTED_LABEL_RE.match(h.title):
+            h.notice_type = (update_to[0].get("type") or "notice").lower()
+            h.notice_for = clean_doi(update_to[0].get("DOI") or "")
+    elif is_notice_title:
+        h.notice_type = NOTICE_PREFIX_RE.match(h.title).group(0).strip(" :-–").lower()
+    for u in update_to:
+        t = (u.get("type") or "").lower()
+        if t in ("retraction", "withdrawal", "removal") and not h.notice_type:
+            h.weak_retraction = True
+            h.retraction_notes.append(f"{u.get('label') or t} (CrossRef update-to, DOI {u.get('DOI')})")
+        elif "concern" in t and not h.notice_type:
+            h.concern = True
+    if RETRACTED_LABEL_RE.match(h.title):
         h.retracted = True
-        h.retraction_notes.append("title carries RETRACTED/WITHDRAWN label (CrossRef)")
+        h.retraction_notes.append("title carries the publisher's RETRACTED/WITHDRAWN label (CrossRef)")
+    if h.weak_retraction and h.retracted:
+        h.weak_retraction = False
     if h.work_type == "posted-content":
         h.preprint = True
         h.preprint_server = squash(m.get("group-title") or (m.get("institution") or [{}])[0].get("name", "") if isinstance(m.get("institution"), list) else m.get("group-title") or "")
@@ -1023,17 +1369,54 @@ def crossref_by_doi(http: Http, doi: str) -> Hit:
 
 
 def doiorg_resolves(http: Http, doi: str) -> Hit:
-    url = "https://doi.org/" + urllib.parse.quote(doi, safe="/()")
+    """Registry check only: doi.org answers a registered DOI with a redirect. The redirect is NOT followed,
+    so no publisher site is contacted and the user's IP and query never leave doi.org."""
+    url = "https://doi.org/" + urllib.parse.quote(doi, safe="/()<>;:")
     h = _hit("doi.org", f"doi:{doi}", url)
-    status, _, final = http.get(url, method="HEAD")
+    status, _, location = http.get(url, method="HEAD", follow_redirects=False)
     if status == 0:
         h.ok, h.error = False, "transport failure"
     elif status in (404, 410):
         h.found = False
-    else:
+    elif 200 <= status < 400:
         h.found = True
         h.doi = doi
-        h.url = final
+        target_host = urllib.parse.urlparse(location).netloc if location else ""
+        h.url = url + (f"  (redirects to {target_host})" if target_host and target_host != "doi.org" else "")
+    else:
+        h.ok, h.error = False, f"HTTP {status}"
+    return h
+
+
+def datacite_by_doi(http: Http, doi: str) -> Hit:
+    """DataCite registers Zenodo, arXiv (10.48550), figshare, Dryad and most dataset/preprint DOIs that CrossRef lacks."""
+    url = "https://api.datacite.org/dois/" + urllib.parse.quote(doi, safe="")
+    h = _hit("datacite", f"doi:{doi}", url)
+    status, d = http.get_json(url)
+    if status == 404:
+        return h
+    if status != 200 or not d:
+        h.ok, h.error = False, f"HTTP {status}"
+        return h
+    a = ((d.get("data") or {}).get("attributes") or {})
+    h.found = True
+    titles = a.get("titles") or []
+    h.title = squash(html.unescape((titles[0] or {}).get("title") or "")) if titles else ""
+    for c in a.get("creators") or []:
+        fam = squash(c.get("familyName") or "") or surname_from_display(c.get("name") or "")
+        giv = squash(c.get("givenName") or "")
+        if fam:
+            h.authors.append(fam)
+            h.authors_full.append(fam + (f", {giv}" if giv else ""))
+    h.first_author = h.authors[0] if h.authors else ""
+    h.year = str(a.get("publicationYear") or "")
+    h.journal = squash(((a.get("container") or {}).get("title")) or a.get("publisher") or "")
+    h.doi = clean_doi(a.get("doi") or doi)
+    types = a.get("types") or {}
+    h.work_type = squash(types.get("resourceTypeGeneral") or types.get("resourceType") or "")
+    if "preprint" in (str(types.get("resourceType") or "") + str(types.get("resourceTypeGeneral") or "")).lower():
+        h.preprint = True
+    _mark_preprint(h)
     return h
 
 
@@ -1051,10 +1434,45 @@ def pubmed_by_pmid(http: Http, pmid: str, want_abstract: bool = False) -> Hit:
         return h
     art = root.find(".//PubmedArticle")
     if art is None:
+        book = root.find(".//PubmedBookArticle")
+        if book is not None:
+            _fill_from_pubmed_book(h, book, want_abstract)
+            return h
         h.found = False
         return h
     _fill_from_pubmed_xml(h, art, want_abstract)
     return h
+
+
+def _fill_from_pubmed_book(h: Hit, art: ET.Element, want_abstract: bool) -> None:
+    """Bookshelf records (StatPearls, GeneReviews, NICE guidance on Bookshelf) come back as PubmedBookArticle."""
+    h.found = True
+    bd = art.find("BookDocument")
+    if bd is None:
+        return
+    h.pmid = bd.findtext("PMID") or ""
+    book = bd.find("Book")
+    book_title = squash("".join(book.find("BookTitle").itertext())) if book is not None and book.find("BookTitle") is not None else ""
+    art_title = squash("".join(bd.find("ArticleTitle").itertext())) if bd.find("ArticleTitle") is not None else ""
+    h.title = art_title or book_title
+    h.journal = book_title if art_title else squash((book.findtext("Publisher/PublisherName") if book is not None else "") or "")
+    for al in list(bd.findall("AuthorList")) + (list(book.findall("AuthorList")) if book is not None else []):
+        for au in al.findall("Author"):
+            last = au.findtext("LastName")
+            if last:
+                h.authors.append(squash(last))
+                h.authors_full.append(squash(last) + (f", {squash(au.findtext('ForeName') or au.findtext('Initials') or '')}" if (au.findtext("ForeName") or au.findtext("Initials")) else ""))
+        if h.authors:
+            break
+    h.first_author = h.authors[0] if h.authors else ""
+    if book is not None:
+        h.year = book.findtext("PubDate/Year") or (book.findtext("PubDate/MedlineDate") or "")[:4]
+    h.work_type = "Book (PubMed Bookshelf)"
+    for i in art.findall(".//PubmedBookData/ArticleIdList/ArticleId"):
+        if i.get("IdType") == "doi" and i.text:
+            h.doi = clean_doi(i.text)
+    if want_abstract:
+        h.abstract = "\n".join(squash("".join(p.itertext())) for p in bd.findall("Abstract/AbstractText"))
 
 
 def _fill_from_pubmed_xml(h: Hit, art: ET.Element, want_abstract: bool) -> None:
@@ -1115,8 +1533,11 @@ def _fill_from_pubmed_xml(h: Hit, art: ET.Element, want_abstract: bool) -> None:
             h.correction = True
         elif rt == "UpdateIn" and "preprint" in (h.work_type or "").lower():
             h.vor_doi = clean_doi(DOI_RE.search(src).group(0)) if DOI_RE.search(src) else h.vor_doi
-    if re.match(r"^\s*(retracted|withdrawn)\b", h.title, flags=re.I):
+    if RETRACTED_LABEL_RE.match(h.title):
         h.retracted = True
+        h.retraction_notes.append("title carries the publisher's RETRACTED label (PubMed)")
+    if NOTICE_PREFIX_RE.match(h.title) or any(p in ("Published Erratum", "Retraction of Publication") for p in ptypes):
+        h.notice_type = "retraction notice" if "Retraction of Publication" in ptypes else "correction/erratum"
     if want_abstract:
         parts = []
         for p in a.findall("Abstract/AbstractText"):
@@ -1168,8 +1589,12 @@ def pubmed_title_search(http: Http, title: str) -> Hit:
         return h
     if not ids:
         return h
-    for ph in pubmed_fetch_many(http, ids):
-        h.candidates.append({"source": "pubmed", "pmid": ph.pmid, "doi": ph.doi, "title": ph.title, "first_author": ph.first_author, "year": ph.year, "journal": ph.journal_abbrev or ph.journal, "retracted": ph.retracted, "preprint": ph.preprint, "pmcid": ph.pmcid})
+    fetched = pubmed_fetch_many(http, ids)
+    if not fetched:                       # esearch found records but efetch failed: the search is NOT a clean negative
+        h.ok, h.error = False, "efetch failed after esearch returned candidates"
+        return h
+    for ph in fetched:
+        h.candidates.append({"source": "pubmed", "pmid": ph.pmid, "doi": ph.doi, "title": ph.title, "first_author": ph.first_author, "year": ph.year, "journal": ph.journal_abbrev or ph.journal, "retracted": ph.retracted, "preprint": ph.preprint, "pmcid": ph.pmcid, "type": ph.work_type, "volume": ph.volume, "pages": ph.pages})
     return h
 
 
@@ -1177,7 +1602,8 @@ def openalex_work(http: Http, ident: str) -> Hit:
     """ident is 'doi:<doi>' or 'pmid:<pmid>'."""
     kind, val = ident.split(":", 1)
     path = f"https://doi.org/{val}" if kind == "doi" else f"pmid:{val}"
-    url = "https://api.openalex.org/works/" + urllib.parse.quote(path, safe=":/") + (f"?mailto={urllib.parse.quote(http.email)}" if http.email else "")
+    extra = openalex_params(http)
+    url = "https://api.openalex.org/works/" + urllib.parse.quote(path, safe=":/") + (f"?{extra}" if extra else "")
     h = _hit("openalex", ident, url)
     status, d = http.get_json(url)
     if status == 404:
@@ -1233,7 +1659,8 @@ def _fill_from_openalex(h: Hit, d: dict) -> None:
 
 def openalex_title_search(http: Http, title: str) -> Hit:
     q = squash(re.sub(r"[^\w\s]", " ", title))
-    url = "https://api.openalex.org/works?filter=title.search:" + urllib.parse.quote(q) + "&per-page=5&select=id,doi,title,publication_year,ids,authorships,primary_location,type,is_retracted,biblio" + (f"&mailto={urllib.parse.quote(http.email)}" if http.email else "")
+    extra = openalex_params(http)
+    url = "https://api.openalex.org/works?filter=title.search:" + urllib.parse.quote(q) + "&per-page=5&select=id,doi,title,publication_year,ids,authorships,primary_location,type,is_retracted,biblio" + (f"&{extra}" if extra else "")
     h = _hit("openalex", f"title:{title[:80]}", url)
     status, d = http.get_json(url)
     if status != 200 or d is None:
@@ -1242,7 +1669,7 @@ def openalex_title_search(http: Http, title: str) -> Hit:
     for w in d.get("results") or []:
         c = Hit(source="openalex", query="")
         _fill_from_openalex(c, w)
-        h.candidates.append({"source": "openalex", "pmid": c.pmid, "doi": c.doi, "title": c.title, "first_author": c.first_author, "year": c.year, "journal": c.journal, "retracted": c.retracted, "preprint": c.preprint, "pmcid": c.pmcid})
+        h.candidates.append({"source": "openalex", "pmid": c.pmid, "doi": c.doi, "title": c.title, "first_author": c.first_author, "year": c.year, "journal": c.journal, "retracted": c.retracted, "preprint": c.preprint, "pmcid": c.pmcid, "type": c.work_type, "volume": c.volume, "pages": c.pages})
     return h
 
 
@@ -1256,7 +1683,7 @@ def europepmc_query(http: Http, query: str, label: str, core: bool = False, page
     results = (d.get("resultList") or {}).get("result") or []
     for r in results:
         c = _europepmc_record(r)
-        h.candidates.append({"source": "europepmc", "pmid": c.pmid, "doi": c.doi, "title": c.title, "first_author": c.first_author, "year": c.year, "journal": c.journal, "retracted": c.retracted, "preprint": c.preprint, "pmcid": c.pmcid, "abstract": c.abstract})
+        h.candidates.append({"source": "europepmc", "pmid": c.pmid, "doi": c.doi, "title": c.title, "first_author": c.first_author, "year": c.year, "journal": c.journal, "retracted": c.retracted, "preprint": c.preprint, "pmcid": c.pmcid, "abstract": c.abstract, "type": c.work_type, "volume": c.volume, "pages": c.pages})
     return h
 
 
@@ -1352,13 +1779,15 @@ def semanticscholar_by_doi(http: Http, doi: str) -> Hit:
 
 def crossref_bibliographic_search(http: Http, ref: Ref) -> Hit:
     q = " ".join(x for x in [ref.title, ref.first_author, ref.year] if x)
-    url = "https://api.crossref.org/works?" + urllib.parse.urlencode({"query.bibliographic": q, "rows": "5", "select": "DOI,title,author,issued,container-title,type,score"})
+    url = "https://api.crossref.org/works?" + urllib.parse.urlencode({"query.bibliographic": q, "rows": "5", "select": "DOI,title,author,issued,container-title,type,score,volume,page"})
     h = _hit("crossref", f"title:{ref.title[:80]}", url)
     status, d = http.get_json(url)
     if status != 200 or not d or d.get("status") != "ok":
         h.ok, h.error = False, f"HTTP {status}"
         return h
     for it in (d.get("message") or {}).get("items") or []:
+        if it.get("type") in ("journal", "journal-issue", "journal-volume", "book-series", "report-series"):
+            continue   # container-level records are never a citable paper
         fam = ((it.get("author") or [{}])[0]).get("family") or ""
         parts = ((it.get("issued") or {}).get("date-parts") or [[None]])[0]
         h.candidates.append({
@@ -1366,7 +1795,8 @@ def crossref_bibliographic_search(http: Http, ref: Ref) -> Hit:
             "title": squash(strip_tags(html.unescape(" ".join(it.get("title") or [])))),
             "first_author": fam, "year": str(parts[0]) if parts and parts[0] else "",
             "journal": squash(" ".join(it.get("container-title") or [])), "retracted": False,
-            "preprint": it.get("type") == "posted-content", "pmcid": "",
+            "preprint": it.get("type") == "posted-content", "pmcid": "", "type": it.get("type") or "",
+            "volume": str(it.get("volume") or ""), "pages": str(it.get("page") or ""),
         })
     return h
 
@@ -1386,8 +1816,12 @@ class Verifier:
 
     def lookup_doi(self, doi: str) -> list[Hit]:
         hits: list[Hit] = []
+        cr: Optional[Hit] = None
         if "crossref" in self.sources:
-            hits.append(crossref_by_doi(self.http, doi))
+            cr = crossref_by_doi(self.http, doi)
+            hits.append(cr)
+        if "datacite" in self.sources and (cr is None or (cr.ok and not cr.found) or doi_prefix(doi) in ("10.5281", "10.48550", "10.6084", "10.5061", "10.17605")):
+            hits.append(datacite_by_doi(self.http, doi))
         if self.resolve_doi_org:
             hits.append(doiorg_resolves(self.http, doi))
         if "openalex" in self.sources:
@@ -1482,6 +1916,10 @@ class Verifier:
                 elif d <= YEAR_WARN:
                     checks.append(Check("year", ref.year, str(y), h.source, "warning", "off by one (online-first vs print?)"))
                     warnings.append(f"year off by one: cited {cy}, source {y}")
+                elif len(years) == 1 and (h.preprint or h.source in ("openalex", "semanticscholar", "datacite")):
+                    # one secondary index disagreeing about the year of a preprint/dataset is not proof of a wrong citation
+                    checks.append(Check("year", ref.year, str(y), h.source, "warning", "single secondary source disagrees"))
+                    warnings.append(f"year differs from the only source that answered ({h.source}: {y} vs cited {cy}) (single source)")
                 else:
                     checks.append(Check("year", ref.year, str(y), h.source, "mismatch"))
                     major.append(f"year mismatch: cited {cy}, source {y}")
@@ -1518,77 +1956,94 @@ class Verifier:
     def verify(self, ref: Ref) -> Result:
         res = Result(ref_id=ref.ref_id, cited={k: v for k, v in asdict(ref).items() if k not in ("raw",) and v})
         res.cited["raw"] = ref.raw
+        notes, issues = res.notes, res.issues
+        notes.extend(ref.parse_notes)
         all_hits: list[Hit] = []
-        found: list[Hit] = []
-        notes = res.notes
-        issues = res.issues
 
-        doi_hits: list[Hit] = []
-        pmid_hits: list[Hit] = []
-        if ref.doi:
-            doi_hits = self.lookup_doi(ref.doi)
-            all_hits += doi_hits
-        if ref.pmid:
-            pmid_hits = self.lookup_pmid(ref.pmid)
-            all_hits += pmid_hits
+        # A web page or organisation document is not a journal article: never match it to one by title.
+        if ref.is_web_resource and not ref.doi and not ref.pmid:
+            res.status, res.confidence = "UNVERIFIABLE", "low"
+            res.flags.append("WEB_RESOURCE")
+            issues.append("web page / organisation document (URL, no DOI, PMID or journal): not checkable against bibliographic databases; open the URL and confirm it says what is claimed")
+            return res
+
+        def has_meta(h: Hit) -> bool:
+            return h.source != "doi.org" and bool(h.title or h.first_author or h.year)
+
+        doi_hits = self.lookup_doi(ref.doi) if ref.doi else []
+        pmid_hits = self.lookup_pmid(ref.pmid) if ref.pmid else []
+        all_hits += doi_hits + pmid_hits
 
         doi_found = [h for h in doi_hits if h.found]
         doi_ok = [h for h in doi_hits if h.ok]
+        doiorg = next((h for h in doi_hits if h.source == "doi.org"), None)
+        crossref = next((h for h in doi_hits if h.source == "crossref"), None)
+        datacite = next((h for h in doi_hits if h.source == "datacite"), None)
         pmid_found = [h for h in pmid_hits if h.found]
         pmid_ok = [h for h in pmid_hits if h.ok]
 
-        doi_missing = bool(ref.doi) and not doi_found and len(doi_ok) >= 1
+        # doi.org is the registry of record for every agency. A DOI that doi.org does not know and that neither
+        # CrossRef nor DataCite holds does not exist, whatever a secondary index (OpenAlex) returns for it.
+        registry_missing = (doiorg is not None and doiorg.ok and not doiorg.found
+                            and (crossref is None or (crossref.ok and not crossref.found))
+                            and (datacite is None or (datacite.ok and not datacite.found)))
+        if registry_missing and any(has_meta(h) for h in doi_found):
+            notes.append("a secondary index (" + ", ".join(h.source for h in doi_found if has_meta(h)) + ") returns a record for this DOI, but doi.org, CrossRef and DataCite do not: the DOI is not registered")
+            doi_found = []
+        doi_missing = bool(ref.doi) and not doi_found and (registry_missing or len(doi_ok) >= 1)
         pmid_missing = bool(ref.pmid) and not pmid_found and len(pmid_ok) >= 1
         doi_unknown = bool(ref.doi) and not doi_found and not doi_ok
         pmid_unknown = bool(ref.pmid) and not pmid_found and not pmid_ok
 
-        # Enrich: a DOI-only citation gets its PubMed record via the PMID that OpenAlex/Europe PMC report
-        if doi_found and not ref.pmid and "pubmed" in self.sources:
-            pm = next((h.pmid for h in doi_found if h.pmid), "")
+        # Enrich a DOI-only citation with its PubMed record (retraction markers live there)
+        doi_meta = [h for h in doi_found if has_meta(h)]
+        if doi_meta and not ref.pmid and "pubmed" in self.sources:
+            pm = next((h.pmid for h in doi_meta if h.pmid), "")
             if pm:
                 ph = pubmed_by_pmid(self.http, pm)
                 all_hits.append(ph)
-                if ph.found and ph.doi and ph.doi == ref.doi:
+                if ph.found and (not ph.doi or ph.doi == ref.doi):
                     doi_found.append(ph)
-                elif ph.found and not ph.doi:
-                    doi_found.append(ph)
+                    doi_meta.append(ph)
 
         found = doi_found + pmid_found
-        if doi_found:
-            res.found_by = "doi"
-        elif pmid_found:
-            res.found_by = "pmid"
+        meta_found = [h for h in found if has_meta(h)]
+        res.found_by = "doi" if doi_meta else ("pmid" if pmid_found else "")
 
         # DOI and PMID must point at the same work
-        if doi_found and pmid_found:
-            same = False
-            for dh in doi_found:
-                for ph in pmid_found:
-                    if (dh.pmid and ph.pmid and dh.pmid == ph.pmid) or (dh.doi and ph.doi and dh.doi == ph.doi):
-                        same = True
-                    elif dh.title and ph.title and title_similarity(dh.title, ph.title) >= TITLE_MATCH:
-                        same = True
+        if doi_meta and pmid_found:
+            same = any(
+                (dh.pmid and ph.pmid and dh.pmid == ph.pmid) or (dh.doi and ph.doi and dh.doi == ph.doi)
+                or (dh.title and ph.title and title_similarity(dh.title, ph.title) >= TITLE_MATCH)
+                for dh in doi_meta for ph in pmid_found)
             if not same:
-                dt = next((h.title for h in doi_found if h.title), "")
+                dt = next((h.title for h in doi_meta if h.title), "")
                 pt = next((h.title for h in pmid_found if h.title), "")
                 issues.append(f"DOI and PMID point to different works: DOI -> \"{dt[:90]}\"; PMID -> \"{pt[:90]}\"")
                 res.flags.append("IDENTIFIER_CONFLICT")
 
+        if ref.pmcid and meta_found:
+            rec_pmc = next((h.pmcid for h in meta_found if h.pmcid), "")
+            if rec_pmc and rec_pmc.upper() != ref.pmcid.upper():
+                res.flags.append("PMCID_MISMATCH")
+                issues.append(f"cited PMCID {ref.pmcid} is not this paper's PMCID ({rec_pmc})")
+
         # Title-only path
         title_hits: list[Hit] = []
-        if not found and not ref.doi and not ref.pmid:
+        if not meta_found and not ref.doi and not ref.pmid:
             if ref.title and len(ref.title.split()) >= 3:
                 title_hits = self.lookup_title(ref)
                 all_hits += title_hits
                 accepted = self._accept_title_candidate(ref, title_hits, res)
                 if accepted:
-                    found = [accepted]
+                    found, meta_found = [accepted], [accepted]
                     res.found_by = "title"
                     res.flags.append("TITLE_MATCHED")
-                    notes.append("no DOI/PMID in the citation; matched by title search, then confirmed by author/year")
+                    corroborated = getattr(accepted, "_corroborated", []) or []
+                    notes.append("no DOI/PMID in the citation; matched by title search and confirmed by " + ("/".join(corroborated) if corroborated else "title alone"))
             else:
                 notes.append("no DOI, PMID or usable title could be parsed from this citation")
-        elif not found and (ref.doi or ref.pmid) and ref.title and len(ref.title.split()) >= 3 and (doi_missing or pmid_missing):
+        elif not meta_found and (ref.doi or ref.pmid) and ref.title and len(ref.title.split()) >= 3 and (doi_missing or pmid_missing):
             # identifiers are dead; see whether the title exists elsewhere so the user gets the right fix
             title_hits = self.lookup_title(ref)
             all_hits += title_hits
@@ -1598,19 +2053,36 @@ class Verifier:
                 notes.append(f"a work with this title does exist ({c.get('source')}: DOI {c.get('doi') or '-'}, PMID {c.get('pmid') or '-'}); the cited identifier is wrong")
                 res.flags.append("IDENTIFIER_WRONG_BUT_TITLE_EXISTS")
 
-        # Field checks
-        checks, major, warnings = self.field_checks(ref, found) if found else ([], [], [])
+        # Field checks: only records that carry metadata count; a bare doi.org redirect compares nothing
+        checks, major, warnings = self.field_checks(ref, meta_found) if meta_found else ([], [], [])
         res.checks = checks
+        if meta_found and ref.author_parse_failed and not ref.first_author:
+            warnings.append("the author list could not be parsed from the citation, so the first author was NOT checked; compare it by hand")
+            res.flags.append("AUTHOR_NOT_CHECKED")
+        if any("(single source)" in w for w in warnings):
+            res.flags.append("SINGLE_SOURCE_CONFLICT")
+        if ref.extra_dois:
+            res.flags.append("MULTIPLE_DOIS")
+            notes.append("further DOI(s) in the same item were not checked: " + ", ".join(ref.extra_dois))
 
-        # Flags from records
-        retracted = any(h.retracted for h in found)
-        concern = any(h.concern for h in found)
-        correction = any(h.correction for h in found)
-        preprint = any(h.preprint for h in found)
-        vor = next((h.vor_doi for h in found if h.vor_doi), "")
+        # Notices and post-publication events
+        notice = next((h for h in meta_found if h.notice_type), None)
+        if notice and not NOTICE_PREFIX_RE.match(ref.title or ""):
+            major.append(f"the cited DOI is a {notice.notice_type} notice" + (f" for DOI {notice.notice_for}" if notice.notice_for else "") + ", not the article itself; cite the original article")
+            res.flags.append("NOTICE_DOI_CITED")
+        strong = [h for h in meta_found if h.retracted]
+        weak = [h for h in meta_found if h.weak_retraction]
+        retracted = bool(strong) or len(weak) >= 2
+        if weak and not retracted:
+            res.flags.append("RETRACTION_HINT")
+            notes.append("CrossRef lists a retraction link for this DOI that no other source confirms; check the publisher page before citing")
+        concern = any(h.concern for h in meta_found)
+        correction = any(h.correction for h in meta_found)
+        preprint = any(h.preprint for h in meta_found)
+        vor = next((h.vor_doi for h in meta_found if h.vor_doi), "")
         if retracted:
             res.flags.append("RETRACTED")
-            for h in found:
+            for h in meta_found:
                 for n in h.retraction_notes:
                     if n not in notes:
                         notes.append(n)
@@ -1620,14 +2092,14 @@ class Verifier:
             res.flags.append("CORRECTION_PUBLISHED")
         if preprint:
             res.flags.append("PREPRINT")
-            server = next((h.preprint_server for h in found if h.preprint_server), "")
+            server = next((h.preprint_server for h in meta_found if h.preprint_server), "")
             notes.append(f"this is a preprint{(' (' + server + ')') if server else ''}; it has not been peer reviewed" + (f"; a published version exists: DOI {vor}" if vor else ""))
             if vor:
                 res.flags.append("PUBLISHED_VERSION_EXISTS")
 
-        # Consensus record
-        res.resolved = self._consensus(found)
-        res.sources_confirming = sorted({h.source for h in found if h.source != "doi.org"})
+        # Consensus record and evidence
+        res.resolved = self._consensus(meta_found)
+        res.sources_confirming = sorted({h.source for h in meta_found})
         res.hits = [asdict(h) for h in all_hits]
         for h in res.hits:
             h.pop("abstract", None)
@@ -1637,27 +2109,34 @@ class Verifier:
 
         # Status
         if doi_missing:
-            issues.append(f"DOI {ref.doi} does not exist in CrossRef/doi.org/OpenAlex")
+            issues.append(f"DOI {ref.doi} is not registered (doi.org" + (", CrossRef" if crossref else "") + (", DataCite" if datacite else "") + ")")
         if pmid_missing:
             issues.append(f"PMID {ref.pmid} does not exist in PubMed")
         if doi_unknown:
-            issues.append(f"DOI {ref.doi} could not be checked (all sources failed)")
+            issues.append(f"DOI {ref.doi} could not be checked (every source failed)")
         if pmid_unknown:
-            issues.append(f"PMID {ref.pmid} could not be checked (all sources failed)")
+            issues.append(f"PMID {ref.pmid} could not be checked (every source failed)")
         issues.extend(major)
 
-        if not found:
-            if (ref.doi or ref.pmid) and (doi_missing or pmid_missing) and not (doi_unknown or pmid_unknown):
+        if not meta_found:
+            if found:
+                res.status = "UNVERIFIABLE"
+                res.flags.append("DOI_RESOLVES_NO_METADATA")
+                issues.append("the DOI resolves at doi.org but no database returned a bibliographic record, so the cited title, author and year were NOT compared; open the DOI and check it by hand")
+            elif (ref.doi or ref.pmid) and (doi_missing or pmid_missing) and not (doi_unknown or pmid_unknown):
                 res.status = "NOT_FOUND"
+            elif "TITLE_ONLY_UNCONFIRMED" in res.flags:
+                res.status = "UNVERIFIABLE"
             elif title_hits:
                 responded = [h for h in title_hits if h.ok]
-                if len(responded) >= 2:
+                errored = [h for h in title_hits if not h.ok]
+                if len(responded) >= 3 or (len(responded) >= 2 and not errored):
                     res.status = "NOT_FOUND"
                     if not any(h.candidates for h in responded):
-                        issues.append("no work with this title in PubMed, OpenAlex, Europe PMC or CrossRef")
+                        issues.append("no work with this title in " + ", ".join(sorted({h.source for h in responded})))
                 else:
                     res.status = "UNVERIFIABLE"
-                    issues.append("title search failed in most sources (network?)")
+                    issues.append(f"title search incomplete: {len(errored)} of {len(title_hits)} sources failed (rate limit or network); re-run later")
             else:
                 res.status = "UNVERIFIABLE"
         elif retracted:
@@ -1670,20 +2149,25 @@ class Verifier:
             issues.extend(warnings)
         else:
             res.status = "VERIFIED"
-            if warnings:
-                issues.extend(warnings)
 
-        # Confidence
+        # Confidence = how many independent databases returned a record (doi.org never counts)
         n_src = len(res.sources_confirming)
-        if res.status in ("VERIFIED", "VERIFIED_WITH_WARNINGS", "RETRACTED"):
-            if res.found_by == "title":
-                res.confidence = "medium" if n_src >= 1 else "low"
-            else:
-                res.confidence = "high" if n_src >= 2 else "medium"
+        if res.status in ("VERIFIED", "VERIFIED_WITH_WARNINGS", "RETRACTED", "MISMATCH"):
+            res.confidence = "high" if n_src >= 2 else ("medium" if n_src == 1 else "low")
+            if res.found_by == "title" and res.confidence == "high":
+                res.confidence = "medium"
+        elif res.status == "NOT_FOUND":
+            answered = len({h.source for h in all_hits if h.ok and h.source != "doi.org"})
+            res.confidence = "high" if answered >= 2 else ("medium" if answered == 1 else "low")
         else:
-            res.confidence = "high" if (doi_ok or pmid_ok or len([h for h in title_hits if h.ok]) >= 2) else "low"
-        if found and ref.parse_confidence == "low" and res.found_by != "title":
+            res.confidence = "low"
+        if meta_found and ref.parse_confidence == "low" and res.found_by != "title" and not ref.title and not ref.first_author:
             notes.append("few cited fields could be parsed, so only the identifier was checked")
+            if len(ref.raw.split()) > 4:
+                res.flags.append("FIELDS_NOT_CHECKED")
+                if res.status == "VERIFIED":
+                    res.status = "VERIFIED_WITH_WARNINGS"
+                    issues.append("the citation text could not be parsed into title/author/year, so only the identifier was verified")
         return res
 
     # ---- helpers -----------------------------------------------------------------------
@@ -1714,20 +2198,44 @@ class Verifier:
                         if not seen[key].get(k) and c.get(k):
                             seen[key][k] = c[k]
         scored: list[tuple[float, bool, bool, bool, dict]] = []
+        letter_like = re.compile(r"letter|comment|editorial|erratum|correction|reply|news", re.I)
+        cited_first_page = re.sub(r"[^\w]", "", (ref.pages or "").split("-")[0].split("–")[0]).lower()
         for c in seen.values():
+            if "(issn)" in (c.get("doi") or "") or (c.get("type") or "") in ("journal", "journal-issue", "journal-volume"):
+                continue   # a journal's own record, not a paper
             s = title_similarity(ref.title, c.get("title") or "")
-            author_ok = (not ref.first_author) or (not c.get("first_author")) or surnames_match(ref.first_author, c["first_author"])
+            both_authors = bool(ref.first_author and c.get("first_author"))
+            author_conf = both_authors and surnames_match(ref.first_author, c["first_author"])
+            author_bad = both_authors and not author_conf
             cy, sy = year_int(ref.year), year_int(c.get("year", ""))
-            year_ok = (cy is None or sy is None) or abs(cy - sy) <= YEAR_WARN
+            year_conf = cy is not None and sy is not None and abs(cy - sy) <= YEAR_WARN
+            year_bad = cy is not None and sy is not None and abs(cy - sy) > YEAR_WARN
+            # a record whose volume AND first page both differ from the citation is a different work
+            # (the letter that reuses a trial's title), not a typo
+            cand_first_page = re.sub(r"[^\w]", "", (c.get("pages") or "").split("-")[0]).lower()
+            vol_page_bad = bool(ref.volume and c.get("volume") and ref.volume.strip() != str(c["volume"]).strip()
+                                and cited_first_page and cand_first_page and cited_first_page != cand_first_page)
+            is_letter = bool(letter_like.search(c.get("type") or "")) and not letter_like.search(ref.title or "")
             journal_ok = bool(ref.journal) and bool(c.get("journal")) and journals_match(ref.journal, [c["journal"]])
-            scored.append((s, author_ok, year_ok, journal_ok, c))
+            if author_bad or year_bad or vol_page_bad or (is_letter and not journal_ok and (ref.volume or ref.pages)):
+                scored.append((s, False, False, journal_ok, dict(c, _reject=f"author_bad={author_bad} year_bad={year_bad} vol_page_bad={vol_page_bad} letter={is_letter}")))
+                continue
+            scored.append((s, author_conf, year_conf, journal_ok, c))
         # best title similarity first; among ties prefer author+year agreement, then journal agreement
         scored.sort(key=lambda t: (-t[0], not (t[1] and t[2]), not t[3]))
         if scored:
             res.notes.append("title candidates: " + "; ".join(f"{c.get('source')}:{s}:{(c.get('title') or '')[:60]}" for s, _, _, _, c in scored[:3]))
         strong = [t for t in scored if t[0] >= TITLE_MATCH]
-        accepted = [t for t in strong if t[1] and t[2]]
+        # Positive corroboration is required: the cited author or the cited year must agree with the record.
+        accepted = [t for t in strong if "_reject" not in t[4] and (t[1] or t[2])]
+        if strong and not accepted and not ref.first_author and not year_int(ref.year):
+            res.flags.append("TITLE_ONLY_UNCONFIRMED")
+            res.issues.append("a work with this title exists, but the citation gives no author or year to confirm it is the one meant; add the DOI or PMID. Candidates: "
+                              + "; ".join(f"{(t[4].get('first_author') or '?')} {t[4].get('year')} {(t[4].get('journal') or '')[:40]} DOI {t[4].get('doi') or '-'}" for t in strong[:3]))
+            return None
         if accepted:
+            for t in accepted:
+                t[4]["_corroborated"] = [k for k, ok in (("author", t[1]), ("year", t[2]), ("journal", t[3])) if ok]
             # several distinct works can share a title (co-publications, letters with the paper's title):
             # use the cited journal to disambiguate, and say so when it cannot be decided
             if len(accepted) > 1:
@@ -1739,27 +2247,32 @@ class Verifier:
                     res.notes.append(f"{len(accepted)} distinct works match this title and author/year; add the DOI or PMID to the citation to make it unambiguous. Matched: "
                                      + "; ".join(f"{(t[4].get('journal') or '?')} {t[4].get('year')} DOI {t[4].get('doi') or '-'}" for t in accepted[:4]))
             c = accepted[0][4]
+            corroborated = c.get("_corroborated", [])
             # Promote the candidate to a full record via its identifiers for a proper cross-check
+            h: Optional[Hit] = None
             if c.get("pmid") and "pubmed" in self.sources:
-                h = pubmed_by_pmid(self.http, c["pmid"])
-                if h.found:
-                    return h
-            if c.get("doi") and "crossref" in self.sources:
-                h = crossref_by_doi(self.http, c["doi"])
-                if h.found:
-                    return h
-            return Hit(source=c.get("source", "title-search"), query=f"title:{ref.title[:80]}", found=True, title=c.get("title", ""), first_author=c.get("first_author", ""), authors=[c.get("first_author", "")], year=c.get("year", ""), journal=c.get("journal", ""), doi=c.get("doi", ""), pmid=c.get("pmid", ""), pmcid=c.get("pmcid", ""), retracted=bool(c.get("retracted")), preprint=bool(c.get("preprint")), retrieved=utcnow())
+                ph = pubmed_by_pmid(self.http, c["pmid"])
+                if ph.found:
+                    h = ph
+            if h is None and c.get("doi") and "crossref" in self.sources:
+                ch = crossref_by_doi(self.http, c["doi"])
+                if ch.found:
+                    h = ch
+            if h is None:
+                h = Hit(source=c.get("source", "title-search"), query=f"title:{ref.title[:80]}", found=True, title=c.get("title", ""), first_author=c.get("first_author", ""), authors=[c.get("first_author", "")], year=c.get("year", ""), journal=c.get("journal", ""), volume=str(c.get("volume") or ""), pages=str(c.get("pages") or ""), doi=c.get("doi", ""), pmid=c.get("pmid", ""), pmcid=c.get("pmcid", ""), retracted=bool(c.get("retracted")), preprint=bool(c.get("preprint")), work_type=c.get("type", ""), retrieved=utcnow())
+            setattr(h, "_corroborated", corroborated)
+            return h
         if strong:
             s, _, _, _, c = strong[0]
             res.flags.append("TITLE_EXISTS_AUTHOR_YEAR_DIFFER")
-            res.issues.append(f"a paper with this title exists but the cited author/year do not match it (source: {c.get('first_author')} {c.get('year')}, {c.get('journal') or ''}, DOI {c.get('doi') or '-'})")
+            res.issues.append(f"a paper with this title exists but the cited author/year/volume do not match it (source: {c.get('first_author')} {c.get('year')}, {c.get('journal') or ''}, DOI {c.get('doi') or '-'})")
         return None
 
     @staticmethod
     def _consensus(found: list[Hit]) -> dict:
         if not found:
             return {}
-        order = {"pubmed": 0, "crossref": 1, "openalex": 2, "europepmc": 3, "semanticscholar": 4, "doi.org": 9}
+        order = {"pubmed": 0, "crossref": 1, "datacite": 2, "openalex": 3, "europepmc": 4, "semanticscholar": 5, "doi.org": 9}
         fs = sorted(found, key=lambda h: order.get(h.source, 5))
         def first(attr: str) -> Any:
             for h in fs:
@@ -1823,18 +2336,29 @@ def build_audit(results: list[Result], source: str, opts: dict) -> dict:
         for f in r.flags:
             flags[f] = flags.get(f, 0) + 1
     blocking = [r.ref_id for r in results if r.status in BLOCKING]
-    review = [r.ref_id for r in results if r.status in REVIEW or "PREPRINT" in r.flags]
+    unchecked = [r.ref_id for r in results if r.status == "UNVERIFIABLE"]
+    review = [r.ref_id for r in results if r.status in REVIEW or any(f in r.flags for f in ("PREPRINT", "MULTIPLE_MATCHES", "TITLE_MATCHED", "RETRACTION_HINT", "AUTHOR_NOT_CHECKED"))]
+    checked = len(results) - len(unchecked)
+    sources = opts.get("sources", list(DEFAULT_SOURCES))
+    offline = bool(opts.get("offline"))
+    if offline:
+        method = f"Offline run on {today()}: {len(results)} references were parsed but NO database was queried. Nothing has been verified."
+    elif checked == 0:
+        method = f"On {today()} none of the {len(results)} references could be checked (every lookup failed: no network, proxy, or rate limit). Nothing has been verified."
+    else:
+        method = (f"{checked} of {len(results)} references were checked on {today()} with citecheck v{__version__} against "
+                  + ", ".join(sources) + " (identifier resolution, then cited title, first author, year and journal compared with the source record; retraction and preprint status flagged)."
+                  + (f" {len(unchecked)} could not be checked and need manual verification." if unchecked else "")
+                  + (f" {opts['cache_hits']} responses came from the local cache (up to 7 days old); use --no-cache for a fresh run." if opts.get("cache_hits") else ""))
     return {
         "tool": TOOL_NAME, "version": __version__, "generated": utcnow(), "source": source,
-        "sources_queried": opts.get("sources", list(DEFAULT_SOURCES)),
-        "total_references": len(results), "counts": counts, "flags": flags,
-        "blocking_ref_ids": blocking, "needs_review_ref_ids": review,
-        "submission_safe": not blocking,
+        "sources_queried": sources, "offline": offline,
+        "total_references": len(results), "checked": checked, "unchecked": len(unchecked), "counts": counts, "flags": flags,
+        "blocking_ref_ids": blocking, "unchecked_ref_ids": unchecked, "needs_review_ref_ids": review,
+        # safe = nothing blocking AND every reference was actually checked
+        "submission_safe": not blocking and not unchecked and checked > 0,
         "fully_verified": all(r.status == "VERIFIED" for r in results) and bool(results),
-        "method_statement": (
-            f"All {len(results)} references were checked on {today()} with citecheck v{__version__} against "
-            + ", ".join(opts.get("sources", list(DEFAULT_SOURCES))) + " (identifier resolution, then cited title, first author, year and journal compared with the source record; retraction and preprint status flagged)."
-        ),
+        "method_statement": method,
         "records": [
             {
                 "ref_id": r.ref_id, "status": r.status, "confidence": r.confidence, "found_by": r.found_by,
@@ -1856,7 +2380,11 @@ def audit_markdown(audit: dict) -> str:
             lines.append(f"| {k} | {audit['counts'][k]} |")
     if audit["flags"]:
         lines += ["", "Flags: " + ", ".join(f"{k} x{v}" for k, v in sorted(audit["flags"].items()))]
-    lines += ["", f"**Submission safe (no NOT_FOUND / MISMATCH / RETRACTED):** {'yes' if audit['submission_safe'] else 'NO'}", ""]
+    if audit.get("unchecked"):
+        verdict = f"NOT CHECKED: {audit['unchecked']} of {audit['total_references']} references could not be verified" + (" (offline run)" if audit.get("offline") else "") + "; the others " + ("have no blocking problems" if not audit["blocking_ref_ids"] else "include blocking problems")
+    else:
+        verdict = "yes" if audit["submission_safe"] else "NO"
+    lines += ["", f"**Submission safe (every reference checked; no NOT_FOUND / MISMATCH / RETRACTED):** {verdict}", ""]
     lines += ["| Ref | Status | Conf. | Sources | Flags | Cited (first author, year, title) | Issues |", "|---|---|---|---|---|---|---|"]
     for r in recs:
         c = r["cited"]
@@ -1906,7 +2434,9 @@ def print_summary(audit: dict, quiet: bool = False) -> None:
         print(f"{r['ref_id'][:14]:<14} {r['status']:<22} {cited:<75} {flags} {issue}")
     print("-" * 100)
     print("counts: " + ", ".join(f"{k}={v}" for k, v in sorted(audit["counts"].items())) + (" | flags: " + ", ".join(f"{k}={v}" for k, v in sorted(audit["flags"].items())) if audit["flags"] else ""))
-    print(f"submission_safe={audit['submission_safe']}  blocking={audit['blocking_ref_ids']}  needs_review={audit['needs_review_ref_ids']}")
+    print(f"submission_safe={audit['submission_safe']}  blocking={audit['blocking_ref_ids']}  unchecked={audit.get('unchecked_ref_ids', [])}  needs_review={audit['needs_review_ref_ids']}")
+    if audit.get("unchecked"):
+        print(f"WARNING: {audit['unchecked']} reference(s) were NOT checked" + (" (offline run)" if audit.get("offline") else " (network failure or rate limit; re-run, or use --no-cache)") + ". Nothing unchecked is verified.")
 
 
 # --------------------------------------------------------------------------------------
@@ -1971,17 +2501,31 @@ def fetch_evidence_for(http: Http, rec: dict, want_fulltext: bool = True) -> dic
             ev["sources"].append(h.url)
     if ev["abstract"]:
         ev["tier"] = "abstract"
+    ev["licence"] = ""
     if want_fulltext and pmcid:
         url = f"https://www.ebi.ac.uk/europepmc/webservices/rest/{pmcid}/fullTextXML"
-        status, body, _ = http.get(url)
+        status, body, _ = http.get(url, use_cache=False)      # publishers' full text is never written to the cache
         if status == 200 and body.strip():
             txt = jats_to_text(body)
             if len(txt) > 500:
                 ev["fulltext"] = txt
                 ev["tier"] = "full_text"
                 ev["sources"].append(url)
+                ev["licence"] = jats_licence(body)
     ev["pmcid"] = pmcid
     return ev
+
+
+def jats_licence(xml: str) -> str:
+    """The licence statement of a JATS article (CC BY, CC BY-NC-ND ...), kept with the text it covers."""
+    m = re.search(r"<license[^>]*>(.*?)</license>", xml, flags=re.S | re.I)
+    txt = squash(strip_tags(html.unescape(m.group(1)))) if m else ""
+    href = re.search(r'(?:xlink:href|href)="(https?://creativecommons\.org/[^"]+)"', xml)
+    ref = re.search(r"<ali:license_ref[^>]*>([^<]+)</ali:license_ref>", xml, flags=re.I)
+    url = (href.group(1) if href else "") or (ref.group(1).strip() if ref else "")
+    if not txt and not url:
+        return "not stated in the XML; assume all rights reserved by the publisher"
+    return (txt[:300] + (" " + url if url and url not in txt else "")).strip()
 
 
 def write_evidence_pack(out_dir: Path, ref_id: str, rec: dict, ev: dict) -> Path:
@@ -1991,7 +2535,8 @@ def write_evidence_pack(out_dir: Path, ref_id: str, rec: dict, ev: dict) -> Path
     lines = [f"# Evidence pack - {ref_id}", "",
              f"- Source record: {vancouver(rec)}",
              f"- Evidence tier available: **{ev['tier']}**" + (" (full text via Europe PMC open-access XML)" if ev["tier"] == "full_text" else " (abstract only: claims about subgroups, secondary endpoints or methods detail cannot be confirmed from this)" if ev["tier"] == "abstract" else " (nothing retrievable: mark claims UNVERIFIABLE)"),
-             f"- Retrieved {utcnow()} from: " + ("; ".join(ev["sources"]) or "-"), ""]
+             f"- Retrieved {utcnow()} from: " + ("; ".join(ev["sources"]) or "-"),
+             "- Copyright: the abstract and any full text below belong to their publisher/authors" + (f"; licence: {ev['licence']}" if ev.get("licence") else "") + ". This pack is for your own claim checking. Do not commit it to a public repository or redistribute it.", ""]
     if rec.get("retracted"):
         lines += ["> **RETRACTED** - this paper has been retracted. Do not use it as evidence.", ""]
     if rec.get("preprint"):
@@ -2008,10 +2553,20 @@ def write_evidence_pack(out_dir: Path, ref_id: str, rec: dict, ev: dict) -> Path
 # Claim extraction
 # --------------------------------------------------------------------------------------
 
-CITE_NUMERIC_RE = re.compile(r"\[(\d{1,3}(?:\s*[,\-–]\s*\d{1,3})*)\]|(?<![\w.])\^(\d{1,3}(?:[,\-–]\d{1,3})*)\^|(?<=[a-z\)\.])(\d{1,3}(?:[,\-–]\d{1,3})*)(?=[\s.,;])")
+CITE_NUMERIC_RE = re.compile(
+    r"\[(\d{1,3}(?:\s*[,\-–]\s*\d{1,3})*)\]"                                                   # [1], [1-3], [2, 5]
+    r"|\^(\d{1,3}(?:[,\-–]\d{1,3})*)\^"                                                         # pandoc superscript ^1^
+    r"|(?:(?<=[a-z\)])|(?<=[A-Za-z\)]\.))(\d{1,3}(?:[,\-–]\d{1,3})*)(?=[\s,;]|\.(?:\s|$)|$)")   # AMA bare superscript 'disease.12' -- never after a digit (0.77)
 CITE_PANDOC_RE = re.compile(r"\[(@[^\]]+)\]|(?<!\w)@([A-Za-z][\w:.\-]+)")
-CITE_APA_RE = re.compile(r"\(((?:[A-Z][\w'’\-]+(?:\s(?:et\s+al\.?|and|&)\s*[A-Z]?[\w'’\-]*)*,?\s*(?:19|20)\d{2}[a-z]?(?:,\s*p+\.\s*\d+)?(?:;\s*)?)+)\)")
-NUMBER_RE = re.compile(r"(?<![\w.])(?:\d{1,3}(?:,\d{3})+|\d+(?:\.\d+)?)\s?%?")
+CITE_TEX_RE = re.compile(r"\\(?:cite[pt]?|parencite|textcite|autocite|citeauthor|citeyear|nocite|footcite)\*?(?:\[[^\]]*\]){0,2}\{([^}]+)\}")
+_APA_NAME = _PARTICLES_RE + "[" + _UC + "][" + _UC + _LC + "'’\\-]+"
+_APA_YEARS = r"(?:19|20)\d{2}[a-z]?(?:,\s*(?:19|20)\d{2}[a-z]?)*"
+CITE_APA_RE = re.compile(
+    r"\((?:e\.g\.,?\s*|see\s+(?:also\s+)?|cf\.\s*|but see\s+)?("
+    r"(?:" + _APA_NAME + r"(?:\s+et\s+al\.?|(?:,|\s+and|\s*&)\s+" + _APA_NAME + r"){0,3},?\s+" + _APA_YEARS + r"(?:,\s*p+\.\s*\d+(?:[\-–]\d+)?)?(?:;\s*)?){1,8}"
+    r")\)")
+CITE_APA_NARRATIVE_RE = re.compile(r"\b(" + _APA_NAME + r"(?:\s+et\s+al\.?|(?:\s+and|\s*&)\s+" + _APA_NAME + r")?)\s*\((" + _APA_YEARS + r")\)")
+NUMBER_RE = re.compile(r"(?<![\w.])(?<![A-Za-z]-)(?:\d{1,3}(?:,\d{3})+|\d+(?:\.\d+)?)\s?%?")   # not the 19 of COVID-19, but keep 0.96 in '0.61-0.96'
 DIRECTION_WORDS = re.compile(r"\b(increas\w*|decreas\w*|reduc\w*|lower\w*|higher|improv\w*|worsen\w*|associat\w*|predict\w*|significant\w*|non-?inferior\w*|superior\w*|no difference|did not|neutral|null|benefit\w*|harm\w*|risk|hazard|odds|ratio|mortality|incidence|prevalence|sensitivity|specificity|AUC|AUROC|accuracy|recommend\w*|guideline\w*|class\s+[I]+|level\s+[ABC])\b", re.I)
 
 
@@ -2031,9 +2586,10 @@ def expand_numeric(tok: str) -> list[str]:
 
 
 def split_sentences(text: str) -> list[str]:
-    text = re.sub(r"\b(et al|Fig|Figs|vs|e\.g|i\.e|Dr|Prof|No|approx|ref|Refs?)\.\s", lambda m: m.group(0).replace(". ", ".\u00a0"), text)
+    # protect abbreviations ('et al. (2020)', 'Fig. 1') with a non-whitespace placeholder (\s matches NBSP too)
+    text = re.sub(r"\b(et al|Fig|Figs|vs|e\.g|i\.e|Dr|Prof|No|approx|ref|Refs?|cf)\.\s", lambda m: m.group(0)[:-1] + "\x01", text)
     parts = re.split(r"(?<=[.!?])\s+(?=[A-Z\[\(\"“])", text)
-    return [squash(p.replace("\u00a0", " ")) for p in parts if squash(p)]
+    return [squash(p.replace("\x01", " ")) for p in parts if squash(p.replace("\x01", " "))]
 
 
 def extract_claims(text: str, style: str = "auto") -> list[dict]:
@@ -2057,24 +2613,34 @@ def extract_claims(text: str, style: str = "auto") -> list[dict]:
                 for k in re.findall(r"@([A-Za-z][\w:.\-]+)", tok):
                     cites.append(k.rstrip("."))
                 kinds.append("pandoc")
+            for tm in CITE_TEX_RE.finditer(sent):
+                cites += [k.strip() for k in tm.group(1).split(",") if k.strip()]
+                kinds.append("latex")
             if not cites and style in ("auto", "numeric"):
+                bracketed = [nm for nm in CITE_NUMERIC_RE.finditer(sent) if nm.group(1) or nm.group(2)]
                 for nm in CITE_NUMERIC_RE.finditer(sent):
                     tok = nm.group(1) or nm.group(2) or nm.group(3)
-                    if tok:
-                        # avoid treating ordinary numbers as superscript cites unless bracketed/caret
-                        if nm.group(3) and not re.search(r"[\.\)]$", sent[:nm.start()]):
+                    if not tok:
+                        continue
+                    if nm.group(3):
+                        # bare AMA superscripts only when the sentence has no bracketed/caret cites, never with a leading zero
+                        if bracketed or tok.startswith("0"):
                             continue
-                        cites += expand_numeric(tok)
-                        kinds.append("numeric")
+                    cites += expand_numeric(tok)
+                    kinds.append("numeric")
             if not cites and style in ("auto", "apa"):
                 for am in CITE_APA_RE.finditer(sent):
                     for piece in re.split(r";\s*", am.group(1)):
                         cites.append(squash(piece))
                     kinds.append("author-year")
+                for am in CITE_APA_NARRATIVE_RE.finditer(sent):
+                    cites.append(squash(f"{am.group(1)}, {am.group(2)}"))
+                    kinds.append("author-year")
             if not cites:
                 continue
             cid += 1
-            numbers = [n.strip() for n in NUMBER_RE.findall(sent) if not re.fullmatch(r"(19|20)\d{2}", n.strip())]
+            sent_wo_cites = CITE_TEX_RE.sub(" ", CITE_PANDOC_RE.sub(" ", CITE_NUMERIC_RE.sub(" ", sent)))
+            numbers = [n.strip() for n in NUMBER_RE.findall(sent_wo_cites) if not re.fullmatch(r"(19|20)\d{2}", n.strip())]
             dirs = sorted({d.lower() for d in DIRECTION_WORDS.findall(sent)})
             kind = "numeric" if numbers else ("directional" if dirs else "attributive")
             claims.append({
@@ -2133,12 +2699,14 @@ def find_candidates(http: Http, verifier: Verifier, query: str, max_results: int
     term = query
     if year_from or year_to:
         term += f' AND ("{year_from or "1900"}"[Date - Publication] : "{year_to or "3000"}"[Date - Publication])'
-    pmids, err = pubmed_search(http, term, max_results)
     cands: dict[str, dict] = {}
-    for h in pubmed_fetch_many(http, pmids):
-        cands[h.doi or f"pmid:{h.pmid}"] = {"pmid": h.pmid, "doi": h.doi, "title": h.title, "first_author": h.first_author, "year": h.year, "journal": h.journal_abbrev or h.journal}
+    if "pubmed" in verifier.sources:
+        pmids, err = pubmed_search(http, term, max_results)
+        for h in pubmed_fetch_many(http, pmids):
+            cands[h.doi or f"pmid:{h.pmid}"] = {"pmid": h.pmid, "doi": h.doi, "title": h.title, "first_author": h.first_author, "year": h.year, "journal": h.journal_abbrev or h.journal}
     if "openalex" in verifier.sources:
-        url = "https://api.openalex.org/works?search=" + urllib.parse.quote(query) + f"&per-page={max_results}&select=id,doi,title,publication_year,ids,authorships,primary_location,type,is_retracted,biblio" + (f"&filter=publication_year:{year_from or 1900}-{year_to or 2100}" if (year_from or year_to) else "") + (f"&mailto={urllib.parse.quote(http.email)}" if http.email else "")
+        extra = openalex_params(http)
+        url = "https://api.openalex.org/works?search=" + urllib.parse.quote(query) + f"&per-page={max_results}&select=id,doi,title,publication_year,ids,authorships,primary_location,type,is_retracted,biblio" + (f"&filter=publication_year:{year_from or 1900}-{year_to or 2100}" if (year_from or year_to) else "") + (f"&{extra}" if extra else "")
         status, d = http.get_json(url)
         for w in (d or {}).get("results") or []:
             c = Hit(source="openalex", query="")
@@ -2182,8 +2750,30 @@ SELFTEST_FIXTURES: list[dict] = [
      "ref": dict(title="Intravenous Turmeric and 30-Day Mortality in Cardiogenic Shock: The TURMERIC-SHOCK Randomized Trial", first_author="Smith", year="2023", journal="Lancet")},
     {"name": "year off by one (online-first vs print)", "expect": "VERIFIED_WITH_WARNINGS",
      "ref": dict(title="Colchicine in Patients with Chronic Coronary Disease", first_author="Nidorf", year="2021", journal="N Engl J Med", doi="10.1056/NEJMoa2021372")},
-    {"name": "preprint cited (medRxiv DOI prefix)", "expect": "PREPRINT_FLAG",
+    {"name": "preprint cited (medRxiv DOI prefix)", "expect": "VERIFIED", "expect_flags": ["PREPRINT"],
      "ref": dict(doi="SELFTEST_PREPRINT_DOI")},
+    {"name": "fabricated title/authors on a real Zenodo dataset DOI (DataCite)", "expect": "MISMATCH",
+     "ref": dict(title="A deep learning electrocardiogram atlas of one million patients with heart failure", first_author="Smith", year="2019", journal="Nature", doi="10.5281/zenodo.23464852")},
+    {"name": "paper ABOUT retractions whose title starts with 'Retracted' (not retracted)", "expect": "VERIFIED",
+     "ref": dict(title="Retracted Publications in the Biomedical Literature from Open Access Journals", first_author="Wang", year="2019", journal="Sci Eng Ethics", doi="10.1007/s11948-018-0040-6")},
+    {"name": "erratum DOI cited as if it were the article", "expect": "MISMATCH", "expect_flags": ["NOTICE_DOI_CITED"],
+     "ref": dict(title="Carotid Atherosclerosis in Patients with Atrial Fibrillation", first_author="Wang", year="2019", journal="Curr Atheroscler Rep", doi="10.1007/s11883-019-0818-2")},
+    {"name": "Wiley SICI DOI with angle brackets (Newcombe, Stat Med 1998)", "expect": "VERIFIED",
+     "text": "Newcombe RG. Two-sided confidence intervals for the single proportion: comparison of seven methods. Stat Med. 1998;17(8):857-872. doi:10.1002/(SICI)1097-0258(19980430)17:8<857::AID-SIM777>3.0.CO;2-E"},
+    {"name": "PubMed Bookshelf record (StatPearls) cited by PMID", "expect": "VERIFIED",
+     "ref": dict(pmid="30252328")},
+    {"name": "web page (WHO fact sheet) with a URL: not a journal article", "expect": "UNVERIFIABLE", "expect_flags": ["WEB_RESOURCE"],
+     "text": "World Health Organization. Cardiovascular diseases (CVDs) fact sheet. https://www.who.int/news-room/fact-sheets/detail/cardiovascular-diseases-(cvds)"},
+    {"name": "Frankenstein with a non-ASCII first author (Özdemir on the LoDoCo2 DOI)", "expect": "MISMATCH",
+     "text": "Özdemir A, Fiolet ATL, Mosterd A, et al. Colchicine in Patients with Chronic Coronary Disease. N Engl J Med. 2020;383(19):1838-1847. doi:10.1056/NEJMoa2021372"},
+    {"name": "Frankenstein with a Jr suffix (Smith AB Jr on the SPRINT DOI)", "expect": "MISMATCH",
+     "text": "Smith AB Jr, Williamson JD, Whelton PK, et al. A Randomized Trial of Intensive versus Standard Blood-Pressure Control. N Engl J Med. 2015;373(22):2103-2116. doi:10.1056/NEJMoa1511939"},
+    {"name": "DOI embedded in a publisher URL with a query string", "expect": "VERIFIED",
+     "text": "Nidorf SM, Fiolet ATL, Mosterd A, et al. Colchicine in Patients with Chronic Coronary Disease. N Engl J Med. 2020;383(19):1838-1847. Available from: https://www.nejm.org/doi/full/10.1056/NEJMoa2021372?query=recirc_curatedRelated_article"},
+    {"name": "'et al.'-only author list resolves to the trial, not the letter sharing its title", "expect": "VERIFIED",
+     "text": "et al. Colchicine in Patients with Chronic Coronary Disease. N Engl J Med. 2020;383(19):1838-1847."},
+    {"name": "BMJ Open paper cited as BMJ (sister journal)", "expect": "VERIFIED_WITH_WARNINGS",
+     "text": "Himmelreich JCL, Harskamp RE, Geelhoed B, et al. Validating risk models versus age alone for atrial fibrillation in a young Dutch population cohort: should atrial fibrillation risk prediction be expanded to younger community members? BMJ. 2022;12(2):e057476. doi:10.1136/bmjopen-2021-057476"},
 ]
 
 
@@ -2199,24 +2789,25 @@ def run_selftest(http: Http, verifier: Verifier, out_dir: Optional[Path]) -> int
     results = []
     fails = 0
     for fx in SELFTEST_FIXTURES:
-        kw = dict(fx["ref"])
-        if kw.get("doi") == "SELFTEST_PREPRINT_DOI":
-            if not pre_doi:
-                print(f"SKIP  {fx['name']} (could not fetch a preprint DOI from CrossRef)")
-                continue
-            kw["doi"] = pre_doi
-        ref = Ref(ref_id=fx["name"][:40], raw=json.dumps(kw), **kw)
-        if ref.first_author and not ref.authors:
-            ref.authors = [ref.first_author]
-        ref.parse_confidence = "high" if (ref.doi or ref.pmid) else "medium"
+        if "text" in fx:
+            ref = parse_free_citation(fx["text"], fx["name"][:40])
+        else:
+            kw = dict(fx["ref"])
+            if kw.get("doi") == "SELFTEST_PREPRINT_DOI":
+                if not pre_doi:
+                    print(f"SKIP  {fx['name']} (could not fetch a preprint DOI from CrossRef)")
+                    continue
+                kw["doi"] = pre_doi
+            raw = (kw.get("doi") or kw.get("pmid") or "") if len(kw) == 1 else json.dumps(kw)
+            ref = Ref(ref_id=fx["name"][:40], raw=raw, **kw)
+            if ref.first_author and not ref.authors:
+                ref.authors = [ref.first_author]
+            ref.parse_confidence = "high" if (ref.doi or ref.pmid) else "medium"
         res = verifier.verify(ref)
         results.append(res)
-        if fx["expect"] == "PREPRINT_FLAG":
-            ok = "PREPRINT" in res.flags
-            got = f"{res.status} flags={res.flags}"
-        else:
-            ok = res.status == fx["expect"]
-            got = res.status
+        want_flags = fx.get("expect_flags", [])
+        ok = res.status == fx["expect"] and all(f in res.flags for f in want_flags)
+        got = res.status + (f" flags={res.flags}" if want_flags or not ok else "")
         fails += 0 if ok else 1
         print(f"{'PASS' if ok else 'FAIL'}  {fx['name']}\n      expected {fx['expect']:<22} got {got}" + (f"\n      {res.issues[0][:110]}" if res.issues else ""))
     print(f"\n{len(results) - fails}/{len(results)} fixtures behaved as expected. HTTP calls: {http.calls}, cache hits: {http.cache_hits}.")
@@ -2248,8 +2839,16 @@ def parse_sources(s: str) -> tuple[str, ...]:
     toks = tuple(t.strip().lower() for t in s.split(",") if t.strip())
     bad = [t for t in toks if t not in ALL_SOURCES]
     if bad:
-        raise SystemExit(f"unknown source(s): {', '.join(bad)}; choose from {', '.join(ALL_SOURCES)}")
+        raise InputError(f"unknown source(s): {', '.join(bad)}; choose from {', '.join(ALL_SOURCES)}")
     return toks or DEFAULT_SOURCES
+
+
+def display_path(p: Path) -> str:
+    """Paths written into shareable audit files: relative to the working directory when possible, never the user's home."""
+    try:
+        return str(p.resolve().relative_to(Path.cwd().resolve()))
+    except Exception:
+        return p.name
 
 
 def cmd_verify(args: argparse.Namespace) -> int:
@@ -2269,12 +2868,15 @@ def cmd_verify(args: argparse.Namespace) -> int:
             eprint(f"input not found: {p}")
             return 2
         refs = parse_input(p, args.format)
-        source = str(p)
+        source = display_path(p)
     if args.limit:
         refs = refs[: args.limit]
     if not refs:
-        eprint("no references detected (try --format, or check that the file has a References section)")
+        eprint("no references detected. Supported inputs: .md .txt .docx .bib .ris .tex .json .csv .tsv with a 'References' heading or one reference per line/numbered item. "
+               "For a pasted list without a heading, make sure each reference starts with its authors, or add a line 'References' above it. PDFs are not read.")
         return 3
+    sources = list(parse_sources(args.sources))
+    cache_hits = 0
     if args.offline:
         results = []
         for r in refs:
@@ -2283,14 +2885,24 @@ def cmd_verify(args: argparse.Namespace) -> int:
             results.append(res)
     else:
         http = make_http(args, out_dir)
-        verifier = Verifier(http, parse_sources(args.sources), resolve_doi_org=not args.no_doi_resolve, quiet=args.quiet)
+        verifier = Verifier(http, tuple(sources), resolve_doi_org=not args.no_doi_resolve, quiet=args.quiet)
         results = []
         for i, r in enumerate(refs, 1):
             if not args.quiet:
                 eprint(f"[{i}/{len(refs)}] {r.ref_id}: {(r.doi and 'doi:' + r.doi) or (r.pmid and 'pmid:' + r.pmid) or (r.title[:60] or r.raw[:60])}")
+            before_fail, before_gets = http.transport_failures, http.gets
             results.append(verifier.verify(r))
+            # Fail fast when the network is down: every lookup for the first reference failed at transport level
+            if i == 1 and http.gets - before_gets > 0 and http.transport_failures - before_fail >= http.gets - before_gets and not args.keep_going and len(refs) > 1:
+                eprint("[citecheck] every request for the first reference failed (no internet, proxy, or firewall). Stopping; remaining references are marked UNVERIFIABLE. Use --keep-going to try them anyway.")
+                for r2 in refs[i:]:
+                    res = Result(ref_id=r2.ref_id, status="UNVERIFIABLE", confidence="low", cited={k: v for k, v in asdict(r2).items() if v})
+                    res.issues.append("not attempted: network unreachable")
+                    results.append(res)
+                break
         http.save_cache()
-    audit = build_audit(results, source, {"sources": list(parse_sources(args.sources))})
+        cache_hits = http.cache_hits
+    audit = build_audit(results, source, {"sources": sources, "offline": bool(args.offline), "cache_hits": cache_hits})
     if out_dir:
         out_dir.mkdir(parents=True, exist_ok=True)
         (out_dir / "reference_audit.json").write_text(json.dumps(audit, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -2305,12 +2917,18 @@ def cmd_verify(args: argparse.Namespace) -> int:
         return 1
     if args.strict and any(r.status != "VERIFIED" for r in results):
         return 1
+    if audit["unchecked"]:
+        return 4
     return 0
 
 
 def cmd_resolve(args: argparse.Namespace) -> int:
     http = make_http(args, None)
     verifier = Verifier(http, parse_sources(args.sources), resolve_doi_org=not args.no_doi_resolve, quiet=True)
+    if len(args.query) > 1 and DOI_RE.search(args.query[0]) and not any(len(q.split()) > 1 for q in args.query):
+        # PowerShell splits 10.1016/S0140-6736(20)31180-6 into several tokens; the truncated DOI would resolve to the wrong record
+        eprint("the DOI looks split by your shell at the parentheses; put it in quotes: resolve \"10.1016/S0140-6736(20)31180-6\"")
+        return 2
     refs = refs_from_ids([" ".join(args.query)])
     res = verifier.verify(refs[0])
     http.save_cache()
@@ -2333,26 +2951,40 @@ def cmd_resolve(args: argparse.Namespace) -> int:
 def cmd_evidence(args: argparse.Namespace) -> int:
     out_dir = Path(args.out_dir)
     http = make_http(args, out_dir)
-    p = Path(args.input)
-    if not p.exists():
-        eprint(f"input not found: {p}")
-        return 2
     records: list[dict]
-    if p.suffix.lower() == ".json" and "records" in p.read_text(encoding="utf-8", errors="replace")[:2000]:
-        audit = json.loads(p.read_text(encoding="utf-8"))
-        records = audit["records"]
+    audit: Optional[dict] = None
+    if args.ids:
+        refs = refs_from_ids(args.ids)
+        p = Path("command-line identifiers")
     else:
-        refs = parse_input(p, args.format)
-        if not refs:
-            eprint("no references detected")
-            return 3
+        if not args.input:
+            eprint("give a reference file, an existing qc/reference_audit.json, or --ids")
+            return 2
+        p = Path(args.input)
+        if not p.exists():
+            eprint(f"input not found: {p}")
+            return 2
+        refs = []
+        if p.suffix.lower() == ".json":
+            try:
+                data = json.loads(read_text(p))
+            except json.JSONDecodeError:
+                data = None
+            if isinstance(data, dict) and data.get("tool") == TOOL_NAME and isinstance(data.get("records"), list):
+                audit = data
+        if audit is None:
+            refs = parse_input(p, args.format)
+            if not refs:
+                eprint("no references detected")
+                return 3
+    if audit is None:
         verifier = Verifier(http, parse_sources(args.sources), quiet=args.quiet)
         results = [verifier.verify(r) for r in refs]
-        audit = build_audit(results, str(p), {"sources": list(parse_sources(args.sources))})
-        (out_dir).mkdir(parents=True, exist_ok=True)
+        audit = build_audit(results, display_path(p) if not args.ids else "command-line identifiers", {"sources": list(parse_sources(args.sources)), "cache_hits": http.cache_hits})
+        out_dir.mkdir(parents=True, exist_ok=True)
         (out_dir / "reference_audit.json").write_text(json.dumps(audit, indent=2, ensure_ascii=False), encoding="utf-8")
         (out_dir / "reference_audit.md").write_text(audit_markdown(audit), encoding="utf-8")
-        records = audit["records"]
+    records = audit["records"]
     ev_dir = out_dir / "evidence"
     index = []
     for rec in records:
@@ -2367,12 +2999,14 @@ def cmd_evidence(args: argparse.Namespace) -> int:
             continue
         ev = fetch_evidence_for(http, resolved, want_fulltext=not args.abstract_only)
         path = write_evidence_pack(ev_dir, rid, resolved, ev)
-        index.append({"ref_id": rid, "status": rec.get("status"), "tier": ev["tier"], "file": str(path), "pmid": resolved.get("pmid"), "doi": resolved.get("doi"), "pmcid": ev.get("pmcid"), "retracted": resolved.get("retracted"), "preprint": resolved.get("preprint"), "chars": len(ev["fulltext"] or ev["abstract"])})
+        index.append({"ref_id": rid, "status": rec.get("status"), "tier": ev["tier"], "file": path.name, "licence": ev.get("licence", ""), "pmid": resolved.get("pmid"), "doi": resolved.get("doi"), "pmcid": ev.get("pmcid"), "retracted": resolved.get("retracted"), "preprint": resolved.get("preprint"), "chars": len(ev["fulltext"] or ev["abstract"])})
         if not args.quiet:
             eprint(f"{rid}: {ev['tier']} ({len(ev['fulltext'] or ev['abstract'])} chars)")
     http.save_cache()
     ev_dir.mkdir(parents=True, exist_ok=True)
-    (ev_dir / "index.json").write_text(json.dumps({"generated": utcnow(), "source": str(p), "packs": index}, indent=2, ensure_ascii=False), encoding="utf-8")
+    (ev_dir / "index.json").write_text(json.dumps({"generated": utcnow(), "source": display_path(p) if not args.ids else "command-line identifiers",
+                                                   "note": "Packs contain publishers' abstracts and open-access full text under their own licences (stated in each pack). They are for your own reading while checking claims: do not commit them to public repositories or redistribute them.",
+                                                   "packs": index}, indent=2, ensure_ascii=False), encoding="utf-8")
     tiers = {}
     for i in index:
         tiers[i["tier"]] = tiers.get(i["tier"], 0) + 1
@@ -2403,20 +3037,42 @@ def cmd_find(args: argparse.Namespace) -> int:
     verifier = Verifier(http, parse_sources(args.sources), quiet=True)
     results = find_candidates(http, verifier, " ".join(args.query), args.max, args.year_from, args.year_to)
     http.save_cache()
-    good = [r for r in results if r.status in ("VERIFIED", "VERIFIED_WITH_WARNINGS", "RETRACTED") and r.resolved]
+    # 'verified' means at least two independent databases returned the record and nothing is retracted
+    verified = [r for r in results if r.status in ("VERIFIED", "VERIFIED_WITH_WARNINGS") and r.resolved and len(r.sources_confirming) >= 2][: args.max]
+    single = [r for r in results if r.status in ("VERIFIED", "VERIFIED_WITH_WARNINGS") and r.resolved and len(r.sources_confirming) < 2]
+    retracted = [r for r in results if r.status == "RETRACTED" and r.resolved]
     if args.json:
-        print(json.dumps([{"status": r.status, "flags": r.flags, "sources": r.sources_confirming, "record": r.resolved, "vancouver": vancouver(r.resolved)} for r in good], indent=2, ensure_ascii=False))
+        print(json.dumps({
+            "verified": [{"status": r.status, "flags": r.flags, "sources": r.sources_confirming, "record": r.resolved, "vancouver": vancouver(r.resolved)} for r in verified],
+            "single_source_unconfirmed": [{"sources": r.sources_confirming, "vancouver": vancouver(r.resolved)} for r in single],
+            "retracted_excluded": [{"flags": r.flags, "vancouver": vancouver(r.resolved)} for r in retracted],
+        }, indent=2, ensure_ascii=False))
     else:
-        print(f"{len(good)} verified candidates for: {' '.join(args.query)}\n")
-        for i, r in enumerate(good, 1):
+        print(f"{len(verified)} verified candidates (confirmed by 2+ databases) for: {' '.join(args.query)}\n")
+        for i, r in enumerate(verified, 1):
             tag = " ".join(f"[{f}]" for f in r.flags)
             print(f"{i}. {vancouver(r.resolved)}  {tag}\n   confirmed by: {', '.join(r.sources_confirming)}")
+        if single:
+            print(f"\n{len(single)} candidate(s) seen in only one database (not verified; check by hand):")
+            for r in single:
+                print(f"   - {vancouver(r.resolved)}  [{', '.join(r.sources_confirming)}]")
+        if retracted:
+            print(f"\n{len(retracted)} RETRACTED paper(s) matched the query and were excluded:")
+            for r in retracted:
+                print(f"   - {vancouver(r.resolved)}")
     if args.bib:
-        with open(args.bib, "a", encoding="utf-8") as fh:
-            for r in good:
-                fh.write(bibtex_entry(r.resolved) + "\n\n")
-        print(f"\nappended {len(good)} BibTeX entries (with verified_on stamps) to {args.bib}")
-    return 0 if good else 1
+        chosen = verified
+        if args.pick:
+            chosen = [verified[i - 1] for i in args.pick if 1 <= i <= len(verified)]
+        if chosen:
+            Path(args.bib).parent.mkdir(parents=True, exist_ok=True)
+            with open(args.bib, "a", encoding="utf-8") as fh:
+                for r in chosen:
+                    fh.write(bibtex_entry(r.resolved) + "\n\n")
+            print(f"\nappended {len(chosen)} verified BibTeX entr{'y' if len(chosen) == 1 else 'ies'} (with verified_on stamps) to {args.bib}" + ("" if args.pick else "; use --pick N to write only the one you chose"))
+        else:
+            print("\nnothing written to --bib: no verified candidate" + (" among the picked numbers" if args.pick else ""))
+    return 0 if verified else 1
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -2441,6 +3097,7 @@ def build_parser() -> argparse.ArgumentParser:
     v.add_argument("--format", default="auto", choices=["auto", "bibtex", "ris", "json", "csv", "tsv", "text", "tex"])
     v.add_argument("--offline", action="store_true", help="parse only; every row becomes UNVERIFIABLE")
     v.add_argument("--strict", action="store_true", help="exit 1 unless every reference is VERIFIED")
+    v.add_argument("--keep-going", action="store_true", help="do not stop early when the network is unreachable")
     v.add_argument("--limit", type=int, default=0)
     v.add_argument("--json", action="store_true", help="print the full audit JSON to stdout")
     common(v)
@@ -2453,7 +3110,8 @@ def build_parser() -> argparse.ArgumentParser:
     r.set_defaults(func=cmd_resolve)
 
     e = sub.add_parser("evidence", help="fetch abstracts and open-access full text for each verified reference (for claim checking)")
-    e.add_argument("input", help="reference file, or an existing qc/reference_audit.json")
+    e.add_argument("input", nargs="?", help="reference file, or an existing qc/reference_audit.json")
+    e.add_argument("--ids", nargs="+", help="DOIs or PMIDs instead of a file")
     e.add_argument("--format", default="auto", choices=["auto", "bibtex", "ris", "json", "csv", "tsv", "text", "tex"])
     e.add_argument("--only", nargs="+", help="ref_ids to fetch")
     e.add_argument("--abstract-only", action="store_true")
@@ -2472,6 +3130,7 @@ def build_parser() -> argparse.ArgumentParser:
     f.add_argument("--year-from", default="")
     f.add_argument("--year-to", default="")
     f.add_argument("--bib", default="", help="append verified BibTeX entries to this file")
+    f.add_argument("--pick", nargs="+", type=int, help="with --bib: write only these candidate numbers")
     f.add_argument("--json", action="store_true")
     common(f, out_default="")
     f.set_defaults(func=cmd_find)
@@ -2504,6 +3163,12 @@ def main(argv: Optional[list[str]] = None) -> int:
     except KeyboardInterrupt:
         eprint("interrupted")
         return 130
+    except InputError as exc:
+        eprint(f"citecheck: {exc}")
+        return 2
+    except (OSError, UnicodeError, ValueError, TypeError, AttributeError, KeyError, ET.ParseError) as exc:
+        eprint(f"citecheck: cannot process the input ({type(exc).__name__}: {exc}). If this is a reference file, check its format; if it keeps failing, please report it with the file type.")
+        return 2
 
 
 if __name__ == "__main__":

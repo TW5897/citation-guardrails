@@ -1,6 +1,6 @@
 # Reference audit - manuscript.md
 
-Generated 2026-10-19T23:56:14Z by citecheck v0.1.0. Sources: crossref, pubmed, openalex, europepmc.
+Generated 2026-10-20T12:55:55Z by citecheck v0.1.0. Sources: crossref, pubmed, openalex, europepmc, datacite.
 
 | Status | Count |
 |---|---|
@@ -11,7 +11,7 @@ Generated 2026-10-19T23:56:14Z by citecheck v0.1.0. Sources: crossref, pubmed, o
 
 Flags: CORRECTION_PUBLISHED x1, EXPRESSION_OF_CONCERN x1, RETRACTED x1
 
-**Submission safe (no NOT_FOUND / MISMATCH / RETRACTED):** NO
+**Submission safe (every reference checked; no NOT_FOUND / MISMATCH / RETRACTED):** NO
 
 | Ref | Status | Conf. | Sources | Flags | Cited (first author, year, title) | Issues |
 |---|---|---|---|---|---|---|
@@ -30,20 +30,21 @@ Flags: CORRECTION_PUBLISHED x1, EXPRESSION_OF_CONCERN x1, RETRACTED x1
 - Cited: `Mehra MR, Desai SS, Ruschitzka F, Patel AN. Hydroxychloroquine or chloroquine with or without a macrolide for treatment of COVID-19: a multinational registry analysis. Lancet. 2020. doi:10.1016/S0140-6736(20)31180-6`
 - Source record: Mehra MR, Desai SS, Ruschitzka F, Patel AN. RETRACTED: Hydroxychloroquine or chloroquine with or without a macrolide for treatment of COVID-19: a multinational registry analysis. Lancet. 2020;395(10240):1820-1820. doi:10.1016/s0140-6736(20)31180-6 PMID: 32450107
 - Issue: this work has been RETRACTED; do not cite it as evidence
+- Note: Expression of concern (CrossRef updated-by, source retraction-watch, DOI 10.1016/s0140-6736(20)31290-3)
+- Note: Retraction (CrossRef updated-by, source retraction-watch, DOI 10.1016/s0140-6736(20)31324-6)
+- Note: Retraction (CrossRef updated-by, source publisher, DOI 10.1016/s0140-6736(20)31174-0)
 - Note: Retraction (CrossRef update-to, DOI 10.1016/s0140-6736(20)31174-0)
 - Note: Retraction (CrossRef update-to, DOI 10.1016/s0140-6736(20)31290-3)
 - Note: Retraction (CrossRef update-to, DOI 10.1016/s0140-6736(20)31324-6)
 - Note: Retraction (CrossRef update-to, DOI 10.1016/s0140-6736(20)31528-2)
-- Note: Expression of concern (CrossRef updated-by, DOI 10.1016/s0140-6736(20)31290-3)
-- Note: Retraction (CrossRef updated-by, DOI 10.1016/s0140-6736(20)31324-6)
-- Note: Retraction (CrossRef updated-by, DOI 10.1016/s0140-6736(20)31174-0)
-- Note: title carries RETRACTED/WITHDRAWN label (CrossRef)
+- Note: title carries the publisher's RETRACTED/WITHDRAWN label (CrossRef)
 - Note: OpenAlex is_retracted=true
 - Note: PubMed PublicationType: Retracted Publication
 - Note: PubMed ExpressionOfConcernIn: Lancet. 2020 Jun 13;395(10240):e102. doi: 10.1016/S0140-6736(20)31290-3.
 - Note: PubMed RetractionIn: Lancet. 2020 Jun 13;395(10240):1820. doi: 10.1016/S0140-6736(20)31324-6.
 - Note: PubMed RetractionIn: Lancet. 2020 Jul 18;396(10245):e2-e3. doi: 10.1016/S0140-6736(20)31528-2.
-- Evidence: https://api.crossref.org/works/10.1016%2Fs0140-6736%2820%2931180-6 ; https://linkinghub.elsevier.com/retrieve/pii/S0140673620311806 ; https://api.openalex.org/works/https://doi.org/10.1016/s0140-6736%2820%2931180-6?mailto=REDACTED ; https://www.ebi.ac.uk/europepmc/webservices/rest/search?query=DOI%3A%2210.1016%2Fs0140-6736%2820%2931180-6%22&format=json&resultType=lite&pageSize=3
+- Note: title carries the publisher's RETRACTED label (PubMed)
+- Evidence: https://api.crossref.org/works/10.1016%2Fs0140-6736%2820%2931180-6 ; https://doi.org/10.1016/s0140-6736(20)31180-6  (redirects to linkinghub.elsevier.com) ; https://api.openalex.org/works/https://doi.org/10.1016/s0140-6736%2820%2931180-6 ; https://www.ebi.ac.uk/europepmc/webservices/rest/search?query=DOI%3A%2210.1016%2Fs0140-6736%2820%2931180-6%22&format=json&resultType=lite&pageSize=3
 
 ### ref_6 - NOT_FOUND
 
@@ -56,12 +57,12 @@ Flags: CORRECTION_PUBLISHED x1, EXPRESSION_OF_CONCERN x1, RETRACTED x1
 - Source record: Nidorf SM, Fiolet ATL, Mosterd A, Eikelboom JW, Schut A, Opstal TSJ, et al. Colchicine in Patients with Chronic Coronary Disease. N Engl J Med. 2020;383(19):1838-1847. doi:10.1056/nejmoa2021372 PMID: 32865380
 - Issue: first author mismatch: cited 'Ebrahimi', source says 'Nidorf'
 - first_author: cited "Ebrahimi" vs crossref "Nidorf" -> mismatch 
-- Evidence: https://api.crossref.org/works/10.1056%2Fnejmoa2021372 ; https://www.nejm.org/doi/10.1056/NEJMoa2021372 ; https://api.openalex.org/works/https://doi.org/10.1056/nejmoa2021372?mailto=REDACTED ; https://www.ebi.ac.uk/europepmc/webservices/rest/search?query=DOI%3A%2210.1056%2Fnejmoa2021372%22&format=json&resultType=lite&pageSize=3
+- Evidence: https://api.crossref.org/works/10.1056%2Fnejmoa2021372 ; https://doi.org/10.1056/nejmoa2021372  (redirects to www.nejm.org) ; https://api.openalex.org/works/https://doi.org/10.1056/nejmoa2021372 ; https://www.ebi.ac.uk/europepmc/webservices/rest/search?query=DOI%3A%2210.1056%2Fnejmoa2021372%22&format=json&resultType=lite&pageSize=3
 
 
 ## Method statement (paste into your methods / cover letter if useful)
 
-All 7 references were checked on 2026-10-20 with citecheck v0.1.0 against crossref, pubmed, openalex, europepmc (identifier resolution, then cited title, first author, year and journal compared with the source record; retraction and preprint status flagged).
+7 of 7 references were checked on 2026-10-20 with citecheck v0.1.0 against crossref, pubmed, openalex, europepmc, datacite (identifier resolution, then cited title, first author, year and journal compared with the source record; retraction and preprint status flagged). 4 responses came from the local cache (up to 7 days old); use --no-cache for a fresh run.
 
 ## What the statuses mean
 

@@ -9,7 +9,6 @@ description: >
   grant, thesis chapter, teaching slide or social post that states a study finding, statistic,
   effect size, guideline recommendation or cites a paper. Apply it even when the user only asks to
   "write the introduction" or "add some references".
-allowed-tools: Bash, Read, Write, Edit, Glob, Grep
 ---
 
 # cite-safely

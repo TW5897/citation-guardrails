@@ -17,3 +17,10 @@ Bug reports with a reference that was classified wrongly are the most useful con
 ## Adding a source
 
 Implement `source_by_doi` / `source_by_pmid` / `source_title_search` functions returning `Hit`, register them in `Verifier.lookup_*`, add the host's polite interval to `HOST_INTERVAL`, and document the endpoint in `docs/how-it-works.md`.
+
+## Releasing
+
+Users who installed the plugin only receive changes when `version` in `.claude-plugin/plugin.json` changes
+(the marketplace entry deliberately carries no version). For every release, bump together: `plugin.json`,
+`__version__` in `skills/check-references/scripts/citecheck.py`, `CITATION.cff` and `CHANGELOG.md`; then run
+the offline tests and the live `selftest`, regenerate `examples/manuscript-audit/output/`, and tag the commit.

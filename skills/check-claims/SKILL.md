@@ -10,7 +10,7 @@ description: >
   AI-assisted drafting or revision, when a reviewer or co-author questions a statement, or whenever
   the user asks "does the source support this", "fact-check my draft", "are these claims right",
   or mentions misquoted, misattributed or over-stated citations.
-allowed-tools: Bash, Read, Write, Glob, Grep, WebFetch, WebSearch
+allowed-tools: Bash(python ${CLAUDE_SKILL_DIR}/../check-references/scripts/citecheck.py *), Bash(python3 ${CLAUDE_SKILL_DIR}/../check-references/scripts/citecheck.py *), Bash(py -3 ${CLAUDE_SKILL_DIR}/../check-references/scripts/citecheck.py *), Read, Glob, Grep
 ---
 
 # check-claims
@@ -30,23 +30,38 @@ Audit only. You do not rewrite the manuscript, invent sources, or guess what a p
 
 ## The scripts
 
-Both live in the sibling skill: `../check-references/scripts/citecheck.py` relative to this file.
-Install both skills together. On Windows use `python` or `py -3` for `python3`.
+Both live in the sibling skill: `${CLAUDE_SKILL_DIR}/../check-references/scripts/citecheck.py`.
+If that file does not exist, stop and tell the user to install `check-references` as well. On Windows
+use `python` or `py -3` for `python3`.
 
 ```bash
 # 1. list every sentence that carries a citation, with its cite keys and numbers
-python3 <skills-dir>/check-references/scripts/citecheck.py claims manuscript.md --out-dir qc
+python "${CLAUDE_SKILL_DIR}/../check-references/scripts/citecheck.py" claims manuscript.md --out-dir qc
 #    -> qc/claims_to_check.json, qc/claims_to_check.md     (--style numeric|pandoc|apa if auto-detection misfires)
+#    handles [1], [1-3], ^1^, Word superscripts, pandoc [@key], LaTeX \cite{}, (Author, 2020) and Author et al. (2020)
 
 # 2. fetch abstracts and, where open access, full text for every verified reference
-python3 <skills-dir>/check-references/scripts/citecheck.py evidence qc/reference_audit.json --out-dir qc
+python "${CLAUDE_SKILL_DIR}/../check-references/scripts/citecheck.py" evidence qc/reference_audit.json --out-dir qc
 #    -> qc/evidence/<ref_id>.md (one pack per reference) and qc/evidence/index.json (tier per reference)
-#    use the .bib or manuscript instead of the audit JSON if check-references has not been run; --only ref_3 ref_7 to limit
+#    --only ref_3 ref_7 to limit; --ids "10.1056/NEJMoa2021372" for a single paper; --abstract-only to skip full text
 ```
 
-The evidence pack header states the **tier** reached: `full_text` (Europe PMC open-access XML),
-`abstract` (PubMed, Europe PMC, OpenAlex or CrossRef), or `none`. For paywalled papers you may also
-use the user's own PDF or a `WebFetch` of the DOI landing page; record that as the tier.
+The evidence pack header states the **tier** reached: `full_text` (Europe PMC open-access XML, with
+its licence), `abstract` (PubMed, Europe PMC, OpenAlex or CrossRef), or `none`. For paywalled papers
+you may use the user's own PDF or notes; record that as the tier. Packs hold publishers' text under
+their own licences: they are for this audit, not for committing to a repository or redistributing.
+
+## Completeness first
+
+`claims_to_check.json` is a starting list, not proof of completeness. Before any verdict:
+
+- If the `claims` command printed `0 cited sentences extracted` or exited 3, **stop**: the manuscript's
+  citation style was not recognised. Look at the text, tell the user which markers you see, and check
+  the sentences by hand or ask for a different export. Zero extracted claims is never "claim-safe".
+- Compare the set of cite keys/numbers in the claims file with the `ref_id`s in `reference_audit.json`.
+  List references that are never cited and cite markers that map to no reference.
+- Skim the manuscript for citation markers the extractor may have missed (unusual superscripts, footnote
+  cites, author-year forms with "e.g.,") and add them to your checklist.
 
 ## Two kinds of claim: separate them first
 
@@ -61,14 +76,15 @@ citation.
 
 ## Per-claim procedure
 
-For each row in `claims_to_check.json`:
+For each row in `claims_to_check.json` (plus anything you added in the completeness step):
 
-1. Map the cite keys to references: numeric `[1]` → `ref_1`; pandoc `@Key` → the BibTeX key; author-year
-   → the matching entry. If a key maps to nothing, record `UNVERIFIABLE (cite key unresolved)`.
+1. Map the cite keys to references: numeric `[1]` → `ref_1`; pandoc `@Key` or LaTeX `\cite{Key}` → the
+   BibTeX key; author-year → the matching entry. If a key maps to nothing, record
+   `UNVERIFIABLE (cite key unresolved)`.
 2. Open the evidence pack(s). Note the tier.
 3. State the **checkable assertion** in one line: the number, direction, endpoint, population or
    recommendation the sentence attributes to the source.
-4. Find the source's words that bear on it. Quote them (≤ 40 words).
+4. Find the source's words that bear on it. Quote them (at most 40 words).
 5. Give a verdict and severity:
 
 | Verdict | Meaning | Severity |
@@ -90,7 +106,7 @@ For each row in `claims_to_check.json`:
 Write `qc/claim_audit.json`:
 
 ```json
-{"manuscript": "...", "generated": "...", "verify_refs_run": true, "claim_safe": false,
+{"manuscript": "...", "generated": "...", "verify_refs_run": true, "claims_extracted": 14, "claims_added_by_hand": 1, "claim_safe": false,
  "counts": {"supported": 0, "partial": 0, "unsupported": 0, "contradicted": 0, "misattributed": 0, "own_data": 0, "unverifiable": 0},
  "records": [{"id": 2, "sentence": "...", "cites": ["1"], "ref_ids": ["ref_1"], "assertion": "...",
               "verdict": "CONTRADICTED", "severity": "high", "tier": "abstract",
@@ -98,9 +114,10 @@ Write `qc/claim_audit.json`:
 ```
 
 and `qc/claim_audit.md` with high-severity rows first. In chat, lead with the high-severity table,
-then medium/low, then `OWN-DATA` / `UNVERIFIABLE` rows that need the user. Finish with the verdict:
-**claim-safe** only if no `CONTRADICTED`, `MISATTRIBUTED`, `UNSUPPORTED` or external `UNVERIFIABLE`
-row remains.
+then medium/low, then `OWN-DATA` / `UNVERIFIABLE` rows that need the user, then the completeness
+notes (uncited references, unmapped markers). Finish with the verdict: **claim-safe** only if the
+extraction was complete and no `CONTRADICTED`, `MISATTRIBUTED`, `UNSUPPORTED` or external
+`UNVERIFIABLE` row remains.
 
 ## Worked example (real abstract, fetched by the script)
 
@@ -127,8 +144,9 @@ Same manuscript: "reduced the composite ... by 31% [1]". Source: HR 0.69. Verdic
 - Do not verify own-result claims against external papers, or "correct" the user's own numbers.
 - Do not mark a claim `SUPPORTED` because the paper is about the right topic; the specific assertion must be there.
 - Do not edit the manuscript or references. Report; the user decides.
-- Do not call a draft claim-safe while a high-severity or external `UNVERIFIABLE` row stands.
+- Do not call a draft claim-safe while a high-severity or external `UNVERIFIABLE` row stands, or when extraction was incomplete.
 - Do not re-audit existence or metadata; that was `check-references`.
+- Do not send manuscript sentences to web search engines; the evidence packs and the user's own sources are the material.
 
 ## Related skills
 

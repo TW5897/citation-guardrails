@@ -1,15 +1,19 @@
 {
   "tool": "citecheck",
   "version": "0.1.0",
-  "generated": "2026-10-19T23:56:14Z",
+  "generated": "2026-10-20T12:55:55Z",
   "source": "examples\\manuscript-audit\\manuscript.md",
   "sources_queried": [
     "crossref",
     "pubmed",
     "openalex",
-    "europepmc"
+    "europepmc",
+    "datacite"
   ],
+  "offline": false,
   "total_references": 7,
+  "checked": 7,
+  "unchecked": 0,
   "counts": {
     "VERIFIED": 4,
     "RETRACTED": 1,
@@ -26,10 +30,11 @@
     "ref_6",
     "ref_7"
   ],
+  "unchecked_ref_ids": [],
   "needs_review_ref_ids": [],
   "submission_safe": false,
   "fully_verified": false,
-  "method_statement": "All 7 references were checked on 2026-10-20 with citecheck v0.1.0 against crossref, pubmed, openalex, europepmc (identifier resolution, then cited title, first author, year and journal compared with the source record; retraction and preprint status flagged).",
+  "method_statement": "7 of 7 references were checked on 2026-10-20 with citecheck v0.1.0 against crossref, pubmed, openalex, europepmc, datacite (identifier resolution, then cited title, first author, year and journal compared with the source record; retraction and preprint status flagged). 4 responses came from the local cache (up to 7 days old); use --no-cache for a fresh run.",
   "records": [
     {
       "ref_id": "ref_1",
@@ -288,13 +293,17 @@
           "preprint": false,
           "preprint_server": "",
           "vor_doi": "",
-          "retrieved": "2026-10-19T23:56:05Z",
+          "notice_type": "",
+          "notice_for": "",
+          "weak_retraction": false,
+          "licence": "",
+          "retrieved": "2026-10-20T12:55:45Z",
           "candidates": []
         },
         {
           "source": "doi.org",
           "query": "doi:10.1056/nejmoa2021372",
-          "url": "https://www.nejm.org/doi/10.1056/NEJMoa2021372",
+          "url": "https://doi.org/10.1056/nejmoa2021372  (redirects to www.nejm.org)",
           "ok": true,
           "found": true,
           "error": "",
@@ -320,13 +329,17 @@
           "preprint": false,
           "preprint_server": "",
           "vor_doi": "",
-          "retrieved": "2026-10-19T23:56:05Z",
+          "notice_type": "",
+          "notice_for": "",
+          "weak_retraction": false,
+          "licence": "",
+          "retrieved": "2026-10-20T12:55:46Z",
           "candidates": []
         },
         {
           "source": "openalex",
           "query": "doi:10.1056/nejmoa2021372",
-          "url": "https://api.openalex.org/works/https://doi.org/10.1056/nejmoa2021372?mailto=REDACTED",
+          "url": "https://api.openalex.org/works/https://doi.org/10.1056/nejmoa2021372",
           "ok": true,
           "found": true,
           "error": "",
@@ -420,7 +433,11 @@
           "preprint": false,
           "preprint_server": "",
           "vor_doi": "",
-          "retrieved": "2026-10-19T23:56:06Z",
+          "notice_type": "",
+          "notice_for": "",
+          "weak_retraction": false,
+          "licence": "",
+          "retrieved": "2026-10-20T12:55:46Z",
           "candidates": []
         },
         {
@@ -454,7 +471,11 @@
           "preprint": false,
           "preprint_server": "",
           "vor_doi": "",
-          "retrieved": "2026-10-19T23:56:06Z",
+          "notice_type": "",
+          "notice_for": "",
+          "weak_retraction": false,
+          "licence": "",
+          "retrieved": "2026-10-20T12:55:46Z",
           "candidates": [
             {
               "source": "europepmc",
@@ -466,14 +487,17 @@
               "journal": "N Engl J Med",
               "retracted": false,
               "preprint": false,
-              "pmcid": ""
+              "pmcid": "",
+              "type": "",
+              "volume": "383",
+              "pages": "1838-1847"
             }
           ]
         },
         {
           "source": "pubmed",
           "query": "pmid:32865380",
-          "url": "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=pubmed&id=32865380&retmode=xml&tool=citecheck&email=REDACTED",
+          "url": "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=pubmed&id=32865380&retmode=xml&tool=citecheck",
           "ok": true,
           "found": true,
           "error": "",
@@ -567,7 +591,11 @@
           "preprint": false,
           "preprint_server": "",
           "vor_doi": "",
-          "retrieved": "2026-10-19T23:56:06Z",
+          "notice_type": "",
+          "notice_for": "",
+          "weak_retraction": false,
+          "licence": "",
+          "retrieved": "2026-10-20T12:55:47Z",
           "candidates": []
         }
       ]
@@ -797,13 +825,17 @@
           "preprint": false,
           "preprint_server": "",
           "vor_doi": "",
-          "retrieved": "2026-10-19T23:56:07Z",
+          "notice_type": "",
+          "notice_for": "",
+          "weak_retraction": false,
+          "licence": "",
+          "retrieved": "2026-10-20T12:55:47Z",
           "candidates": []
         },
         {
           "source": "doi.org",
           "query": "doi:10.1056/nejmoa1912388",
-          "url": "https://www.nejm.org/doi/10.1056/NEJMoa1912388",
+          "url": "https://doi.org/10.1056/nejmoa1912388  (redirects to www.nejm.org)",
           "ok": true,
           "found": true,
           "error": "",
@@ -829,13 +861,17 @@
           "preprint": false,
           "preprint_server": "",
           "vor_doi": "",
-          "retrieved": "2026-10-19T23:56:07Z",
+          "notice_type": "",
+          "notice_for": "",
+          "weak_retraction": false,
+          "licence": "",
+          "retrieved": "2026-10-20T12:55:48Z",
           "candidates": []
         },
         {
           "source": "openalex",
           "query": "doi:10.1056/nejmoa1912388",
-          "url": "https://api.openalex.org/works/https://doi.org/10.1056/nejmoa1912388?mailto=REDACTED",
+          "url": "https://api.openalex.org/works/https://doi.org/10.1056/nejmoa1912388",
           "ok": true,
           "found": true,
           "error": "",
@@ -913,7 +949,11 @@
           "preprint": false,
           "preprint_server": "",
           "vor_doi": "",
-          "retrieved": "2026-10-19T23:56:08Z",
+          "notice_type": "",
+          "notice_for": "",
+          "weak_retraction": false,
+          "licence": "",
+          "retrieved": "2026-10-20T12:55:48Z",
           "candidates": []
         },
         {
@@ -947,7 +987,11 @@
           "preprint": false,
           "preprint_server": "",
           "vor_doi": "",
-          "retrieved": "2026-10-19T23:56:08Z",
+          "notice_type": "",
+          "notice_for": "",
+          "weak_retraction": false,
+          "licence": "",
+          "retrieved": "2026-10-20T12:55:48Z",
           "candidates": [
             {
               "source": "europepmc",
@@ -959,14 +1003,17 @@
               "journal": "N Engl J Med",
               "retracted": false,
               "preprint": false,
-              "pmcid": ""
+              "pmcid": "",
+              "type": "",
+              "volume": "381",
+              "pages": "2497-2505"
             }
           ]
         },
         {
           "source": "pubmed",
           "query": "pmid:31733140",
-          "url": "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=pubmed&id=31733140&retmode=xml&tool=citecheck&email=REDACTED",
+          "url": "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=pubmed&id=31733140&retmode=xml&tool=citecheck",
           "ok": true,
           "found": true,
           "error": "",
@@ -1044,7 +1091,11 @@
           "preprint": false,
           "preprint_server": "",
           "vor_doi": "",
-          "retrieved": "2026-10-19T23:56:08Z",
+          "notice_type": "",
+          "notice_for": "",
+          "weak_retraction": false,
+          "licence": "",
+          "retrieved": "2026-10-20T12:55:49Z",
           "candidates": []
         }
       ]
@@ -1172,7 +1223,7 @@
         {
           "source": "pubmed",
           "query": "pmid:39034931",
-          "url": "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=pubmed&id=39034931&retmode=xml&tool=citecheck&email=REDACTED",
+          "url": "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=pubmed&id=39034931&retmode=xml&tool=citecheck",
           "ok": true,
           "found": true,
           "error": "",
@@ -1228,7 +1279,11 @@
           "preprint": false,
           "preprint_server": "",
           "vor_doi": "",
-          "retrieved": "2026-10-19T23:56:09Z",
+          "notice_type": "",
+          "notice_for": "",
+          "weak_retraction": false,
+          "licence": "",
+          "retrieved": "2026-10-20T12:55:49Z",
           "candidates": []
         },
         {
@@ -1262,7 +1317,11 @@
           "preprint": false,
           "preprint_server": "",
           "vor_doi": "",
-          "retrieved": "2026-10-19T23:56:09Z",
+          "notice_type": "",
+          "notice_for": "",
+          "weak_retraction": false,
+          "licence": "",
+          "retrieved": "2026-10-20T12:55:49Z",
           "candidates": [
             {
               "source": "europepmc",
@@ -1274,14 +1333,17 @@
               "journal": "Neurologist",
               "retracted": false,
               "preprint": false,
-              "pmcid": ""
+              "pmcid": "",
+              "type": "",
+              "volume": "29",
+              "pages": "317-322"
             }
           ]
         },
         {
           "source": "openalex",
           "query": "pmid:39034931",
-          "url": "https://api.openalex.org/works/pmid:39034931?mailto=REDACTED",
+          "url": "https://api.openalex.org/works/pmid:39034931",
           "ok": true,
           "found": true,
           "error": "",
@@ -1337,7 +1399,11 @@
           "preprint": false,
           "preprint_server": "",
           "vor_doi": "",
-          "retrieved": "2026-10-19T23:56:09Z",
+          "notice_type": "",
+          "notice_for": "",
+          "weak_retraction": false,
+          "licence": "",
+          "retrieved": "2026-10-20T12:55:50Z",
           "candidates": []
         }
       ]
@@ -1362,19 +1428,20 @@
         "this work has been RETRACTED; do not cite it as evidence"
       ],
       "notes": [
+        "Expression of concern (CrossRef updated-by, source retraction-watch, DOI 10.1016/s0140-6736(20)31290-3)",
+        "Retraction (CrossRef updated-by, source retraction-watch, DOI 10.1016/s0140-6736(20)31324-6)",
+        "Retraction (CrossRef updated-by, source publisher, DOI 10.1016/s0140-6736(20)31174-0)",
         "Retraction (CrossRef update-to, DOI 10.1016/s0140-6736(20)31174-0)",
         "Retraction (CrossRef update-to, DOI 10.1016/s0140-6736(20)31290-3)",
         "Retraction (CrossRef update-to, DOI 10.1016/s0140-6736(20)31324-6)",
         "Retraction (CrossRef update-to, DOI 10.1016/s0140-6736(20)31528-2)",
-        "Expression of concern (CrossRef updated-by, DOI 10.1016/s0140-6736(20)31290-3)",
-        "Retraction (CrossRef updated-by, DOI 10.1016/s0140-6736(20)31324-6)",
-        "Retraction (CrossRef updated-by, DOI 10.1016/s0140-6736(20)31174-0)",
-        "title carries RETRACTED/WITHDRAWN label (CrossRef)",
+        "title carries the publisher's RETRACTED/WITHDRAWN label (CrossRef)",
         "OpenAlex is_retracted=true",
         "PubMed PublicationType: Retracted Publication",
         "PubMed ExpressionOfConcernIn: Lancet. 2020 Jun 13;395(10240):e102. doi: 10.1016/S0140-6736(20)31290-3.",
         "PubMed RetractionIn: Lancet. 2020 Jun 13;395(10240):1820. doi: 10.1016/S0140-6736(20)31324-6.",
-        "PubMed RetractionIn: Lancet. 2020 Jul 18;396(10245):e2-e3. doi: 10.1016/S0140-6736(20)31528-2."
+        "PubMed RetractionIn: Lancet. 2020 Jul 18;396(10245):e2-e3. doi: 10.1016/S0140-6736(20)31528-2.",
+        "title carries the publisher's RETRACTED label (PubMed)"
       ],
       "cited": {
         "ref_id": "ref_4",
@@ -1496,27 +1563,31 @@
           "work_type": "journal-article",
           "retracted": true,
           "retraction_notes": [
+            "Expression of concern (CrossRef updated-by, source retraction-watch, DOI 10.1016/s0140-6736(20)31290-3)",
+            "Retraction (CrossRef updated-by, source retraction-watch, DOI 10.1016/s0140-6736(20)31324-6)",
+            "Retraction (CrossRef updated-by, source publisher, DOI 10.1016/s0140-6736(20)31174-0)",
             "Retraction (CrossRef update-to, DOI 10.1016/s0140-6736(20)31174-0)",
             "Retraction (CrossRef update-to, DOI 10.1016/s0140-6736(20)31290-3)",
             "Retraction (CrossRef update-to, DOI 10.1016/s0140-6736(20)31324-6)",
             "Retraction (CrossRef update-to, DOI 10.1016/s0140-6736(20)31528-2)",
-            "Expression of concern (CrossRef updated-by, DOI 10.1016/s0140-6736(20)31290-3)",
-            "Retraction (CrossRef updated-by, DOI 10.1016/s0140-6736(20)31324-6)",
-            "Retraction (CrossRef updated-by, DOI 10.1016/s0140-6736(20)31174-0)",
-            "title carries RETRACTED/WITHDRAWN label (CrossRef)"
+            "title carries the publisher's RETRACTED/WITHDRAWN label (CrossRef)"
           ],
           "concern": true,
           "correction": true,
           "preprint": false,
           "preprint_server": "",
           "vor_doi": "",
-          "retrieved": "2026-10-19T23:56:10Z",
+          "notice_type": "",
+          "notice_for": "",
+          "weak_retraction": false,
+          "licence": "",
+          "retrieved": "2026-10-20T12:55:50Z",
           "candidates": []
         },
         {
           "source": "doi.org",
           "query": "doi:10.1016/s0140-6736(20)31180-6",
-          "url": "https://linkinghub.elsevier.com/retrieve/pii/S0140673620311806",
+          "url": "https://doi.org/10.1016/s0140-6736(20)31180-6  (redirects to linkinghub.elsevier.com)",
           "ok": true,
           "found": true,
           "error": "",
@@ -1542,13 +1613,17 @@
           "preprint": false,
           "preprint_server": "",
           "vor_doi": "",
-          "retrieved": "2026-10-19T23:56:10Z",
+          "notice_type": "",
+          "notice_for": "",
+          "weak_retraction": false,
+          "licence": "",
+          "retrieved": "2026-10-20T12:55:50Z",
           "candidates": []
         },
         {
           "source": "openalex",
           "query": "doi:10.1016/s0140-6736(20)31180-6",
-          "url": "https://api.openalex.org/works/https://doi.org/10.1016/s0140-6736%2820%2931180-6?mailto=REDACTED",
+          "url": "https://api.openalex.org/works/https://doi.org/10.1016/s0140-6736%2820%2931180-6",
           "ok": true,
           "found": true,
           "error": "",
@@ -1586,7 +1661,11 @@
           "preprint": false,
           "preprint_server": "",
           "vor_doi": "",
-          "retrieved": "2026-10-19T23:56:11Z",
+          "notice_type": "",
+          "notice_for": "",
+          "weak_retraction": false,
+          "licence": "",
+          "retrieved": "2026-10-20T12:55:51Z",
           "candidates": []
         },
         {
@@ -1620,7 +1699,11 @@
           "preprint": false,
           "preprint_server": "",
           "vor_doi": "",
-          "retrieved": "2026-10-19T23:56:11Z",
+          "notice_type": "",
+          "notice_for": "",
+          "weak_retraction": false,
+          "licence": "",
+          "retrieved": "2026-10-20T12:55:51Z",
           "candidates": [
             {
               "source": "europepmc",
@@ -1632,14 +1715,17 @@
               "journal": "Lancet",
               "retracted": false,
               "preprint": false,
-              "pmcid": "PMC7255293"
+              "pmcid": "PMC7255293",
+              "type": "",
+              "volume": "",
+              "pages": "S0140-6736(20)31180-6"
             }
           ]
         },
         {
           "source": "pubmed",
           "query": "pmid:32450107",
-          "url": "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=pubmed&id=32450107&retmode=xml&tool=citecheck&email=REDACTED",
+          "url": "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=pubmed&id=32450107&retmode=xml&tool=citecheck",
           "ok": true,
           "found": true,
           "error": "",
@@ -1673,14 +1759,19 @@
             "PubMed PublicationType: Retracted Publication",
             "PubMed ExpressionOfConcernIn: Lancet. 2020 Jun 13;395(10240):e102. doi: 10.1016/S0140-6736(20)31290-3.",
             "PubMed RetractionIn: Lancet. 2020 Jun 13;395(10240):1820. doi: 10.1016/S0140-6736(20)31324-6.",
-            "PubMed RetractionIn: Lancet. 2020 Jul 18;396(10245):e2-e3. doi: 10.1016/S0140-6736(20)31528-2."
+            "PubMed RetractionIn: Lancet. 2020 Jul 18;396(10245):e2-e3. doi: 10.1016/S0140-6736(20)31528-2.",
+            "title carries the publisher's RETRACTED label (PubMed)"
           ],
           "concern": true,
           "correction": true,
           "preprint": false,
           "preprint_server": "",
           "vor_doi": "",
-          "retrieved": "2026-10-19T23:56:11Z",
+          "notice_type": "",
+          "notice_for": "",
+          "weak_retraction": false,
+          "licence": "",
+          "retrieved": "2026-10-20T12:55:51Z",
           "candidates": []
         }
       ]
@@ -1913,13 +2004,17 @@
           "preprint": false,
           "preprint_server": "",
           "vor_doi": "",
-          "retrieved": "2026-10-19T23:56:11Z",
+          "notice_type": "",
+          "notice_for": "",
+          "weak_retraction": false,
+          "licence": "",
+          "retrieved": "2026-10-20T12:55:52Z",
           "candidates": []
         },
         {
           "source": "doi.org",
           "query": "doi:10.1136/bmj.n71",
-          "url": "https://www.bmj.com/lookup/doi/10.1136/bmj.n71",
+          "url": "https://doi.org/10.1136/bmj.n71  (redirects to www.bmj.com)",
           "ok": true,
           "found": true,
           "error": "",
@@ -1945,13 +2040,17 @@
           "preprint": false,
           "preprint_server": "",
           "vor_doi": "",
-          "retrieved": "2026-10-19T23:56:12Z",
+          "notice_type": "",
+          "notice_for": "",
+          "weak_retraction": false,
+          "licence": "",
+          "retrieved": "2026-10-20T12:55:52Z",
           "candidates": []
         },
         {
           "source": "openalex",
           "query": "doi:10.1136/bmj.n71",
-          "url": "https://api.openalex.org/works/https://doi.org/10.1136/bmj.n71?mailto=REDACTED",
+          "url": "https://api.openalex.org/works/https://doi.org/10.1136/bmj.n71",
           "ok": true,
           "found": true,
           "error": "",
@@ -2031,7 +2130,11 @@
           "preprint": false,
           "preprint_server": "",
           "vor_doi": "",
-          "retrieved": "2026-10-19T23:56:12Z",
+          "notice_type": "",
+          "notice_for": "",
+          "weak_retraction": false,
+          "licence": "",
+          "retrieved": "2026-10-20T12:55:52Z",
           "candidates": []
         },
         {
@@ -2065,7 +2168,11 @@
           "preprint": false,
           "preprint_server": "",
           "vor_doi": "",
-          "retrieved": "2026-10-19T23:56:13Z",
+          "notice_type": "",
+          "notice_for": "",
+          "weak_retraction": false,
+          "licence": "",
+          "retrieved": "2026-10-20T12:55:53Z",
           "candidates": [
             {
               "source": "europepmc",
@@ -2077,14 +2184,17 @@
               "journal": "BMJ",
               "retracted": false,
               "preprint": false,
-              "pmcid": "PMC8005924"
+              "pmcid": "PMC8005924",
+              "type": "",
+              "volume": "372",
+              "pages": "n71"
             }
           ]
         },
         {
           "source": "pubmed",
           "query": "pmid:33782057",
-          "url": "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=pubmed&id=33782057&retmode=xml&tool=citecheck&email=REDACTED",
+          "url": "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=pubmed&id=33782057&retmode=xml&tool=citecheck",
           "ok": true,
           "found": true,
           "error": "",
@@ -2164,7 +2274,11 @@
           "preprint": false,
           "preprint_server": "",
           "vor_doi": "",
-          "retrieved": "2026-10-19T23:56:13Z",
+          "notice_type": "",
+          "notice_for": "",
+          "weak_retraction": false,
+          "licence": "",
+          "retrieved": "2026-10-20T12:55:53Z",
           "candidates": []
         }
       ]
@@ -2203,7 +2317,7 @@
         {
           "source": "pubmed",
           "query": "title:Intravenous Turmeric and 30-Day Mortality in Cardiogenic Shock: The TURMERIC-SHO",
-          "url": "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&term=Intravenous+Turmeric+and+30-Day+Mortality+in+Cardiogenic+Shock+The+TURMERIC-SHOCK+Randomized+Trial%5BTitle%5D&retmode=json&retmax=5&tool=citecheck&email=REDACTED",
+          "url": "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&term=Intravenous+Turmeric+and+30-Day+Mortality+in+Cardiogenic+Shock+The+TURMERIC-SHOCK+Randomized+Trial%5BTitle%5D&retmode=json&retmax=5&tool=citecheck",
           "ok": true,
           "found": false,
           "error": "",
@@ -2229,13 +2343,17 @@
           "preprint": false,
           "preprint_server": "",
           "vor_doi": "",
-          "retrieved": "2026-10-19T23:56:13Z",
+          "notice_type": "",
+          "notice_for": "",
+          "weak_retraction": false,
+          "licence": "",
+          "retrieved": "2026-10-20T12:55:53Z",
           "candidates": []
         },
         {
           "source": "openalex",
           "query": "title:Intravenous Turmeric and 30-Day Mortality in Cardiogenic Shock: The TURMERIC-SHO",
-          "url": "https://api.openalex.org/works?filter=title.search:Intravenous%20Turmeric%20and%2030%20Day%20Mortality%20in%20Cardiogenic%20Shock%20The%20TURMERIC%20SHOCK%20Randomized%20Trial&per-page=5&select=id,doi,title,publication_year,ids,authorships,primary_location,type,is_retracted,biblio&mailto=REDACTED",
+          "url": "https://api.openalex.org/works?filter=title.search:Intravenous%20Turmeric%20and%2030%20Day%20Mortality%20in%20Cardiogenic%20Shock%20The%20TURMERIC%20SHOCK%20Randomized%20Trial&per-page=5&select=id,doi,title,publication_year,ids,authorships,primary_location,type,is_retracted,biblio",
           "ok": true,
           "found": false,
           "error": "",
@@ -2261,7 +2379,11 @@
           "preprint": false,
           "preprint_server": "",
           "vor_doi": "",
-          "retrieved": "2026-10-19T23:56:13Z",
+          "notice_type": "",
+          "notice_for": "",
+          "weak_retraction": false,
+          "licence": "",
+          "retrieved": "2026-10-20T12:55:54Z",
           "candidates": []
         },
         {
@@ -2293,13 +2415,17 @@
           "preprint": false,
           "preprint_server": "",
           "vor_doi": "",
-          "retrieved": "2026-10-19T23:56:14Z",
+          "notice_type": "",
+          "notice_for": "",
+          "weak_retraction": false,
+          "licence": "",
+          "retrieved": "2026-10-20T12:55:54Z",
           "candidates": []
         },
         {
           "source": "crossref",
           "query": "title:Intravenous Turmeric and 30-Day Mortality in Cardiogenic Shock: The TURMERIC-SHO",
-          "url": "https://api.crossref.org/works?query.bibliographic=Intravenous+Turmeric+and+30-Day+Mortality+in+Cardiogenic+Shock%3A+The+TURMERIC-SHOCK+Randomized+Trial+Smith+2023&rows=5&select=DOI%2Ctitle%2Cauthor%2Cissued%2Ccontainer-title%2Ctype%2Cscore",
+          "url": "https://api.crossref.org/works?query.bibliographic=Intravenous+Turmeric+and+30-Day+Mortality+in+Cardiogenic+Shock%3A+The+TURMERIC-SHOCK+Randomized+Trial+Smith+2023&rows=5&select=DOI%2Ctitle%2Cauthor%2Cissued%2Ccontainer-title%2Ctype%2Cscore%2Cvolume%2Cpage",
           "ok": true,
           "found": false,
           "error": "",
@@ -2325,7 +2451,11 @@
           "preprint": false,
           "preprint_server": "",
           "vor_doi": "",
-          "retrieved": "2026-10-19T23:56:14Z",
+          "notice_type": "",
+          "notice_for": "",
+          "weak_retraction": false,
+          "licence": "",
+          "retrieved": "2026-10-20T12:55:54Z",
           "candidates": [
             {
               "source": "crossref",
@@ -2337,7 +2467,10 @@
               "journal": "Circulation",
               "retracted": false,
               "preprint": false,
-              "pmcid": ""
+              "pmcid": "",
+              "type": "journal-article",
+              "volume": "140",
+              "pages": ""
             },
             {
               "source": "crossref",
@@ -2349,7 +2482,10 @@
               "journal": "Circulation",
               "retracted": false,
               "preprint": false,
-              "pmcid": ""
+              "pmcid": "",
+              "type": "journal-article",
+              "volume": "140",
+              "pages": ""
             },
             {
               "source": "crossref",
@@ -2361,7 +2497,10 @@
               "journal": "Structural Heart",
               "retracted": false,
               "preprint": false,
-              "pmcid": ""
+              "pmcid": "",
+              "type": "journal-article",
+              "volume": "7",
+              "pages": "100162"
             },
             {
               "source": "crossref",
@@ -2373,7 +2512,10 @@
               "journal": "European Heart Journal",
               "retracted": false,
               "preprint": false,
-              "pmcid": ""
+              "pmcid": "",
+              "type": "journal-article",
+              "volume": "44",
+              "pages": ""
             },
             {
               "source": "crossref",
@@ -2385,7 +2527,10 @@
               "journal": "JAMA",
               "retracted": false,
               "preprint": false,
-              "pmcid": ""
+              "pmcid": "",
+              "type": "journal-article",
+              "volume": "327",
+              "pages": "1928"
             }
           ]
         }
@@ -2650,13 +2795,17 @@
           "preprint": false,
           "preprint_server": "",
           "vor_doi": "",
-          "retrieved": "2026-10-19T23:56:14Z",
+          "notice_type": "",
+          "notice_for": "",
+          "weak_retraction": false,
+          "licence": "",
+          "retrieved": "2026-10-20T12:55:55Z",
           "candidates": []
         },
         {
           "source": "doi.org",
           "query": "doi:10.1056/nejmoa2021372",
-          "url": "https://www.nejm.org/doi/10.1056/NEJMoa2021372",
+          "url": "https://doi.org/10.1056/nejmoa2021372  (redirects to www.nejm.org)",
           "ok": true,
           "found": true,
           "error": "",
@@ -2682,13 +2831,17 @@
           "preprint": false,
           "preprint_server": "",
           "vor_doi": "",
-          "retrieved": "2026-10-19T23:56:14Z",
+          "notice_type": "",
+          "notice_for": "",
+          "weak_retraction": false,
+          "licence": "",
+          "retrieved": "2026-10-20T12:55:55Z",
           "candidates": []
         },
         {
           "source": "openalex",
           "query": "doi:10.1056/nejmoa2021372",
-          "url": "https://api.openalex.org/works/https://doi.org/10.1056/nejmoa2021372?mailto=REDACTED",
+          "url": "https://api.openalex.org/works/https://doi.org/10.1056/nejmoa2021372",
           "ok": true,
           "found": true,
           "error": "",
@@ -2782,7 +2935,11 @@
           "preprint": false,
           "preprint_server": "",
           "vor_doi": "",
-          "retrieved": "2026-10-19T23:56:14Z",
+          "notice_type": "",
+          "notice_for": "",
+          "weak_retraction": false,
+          "licence": "",
+          "retrieved": "2026-10-20T12:55:55Z",
           "candidates": []
         },
         {
@@ -2816,7 +2973,11 @@
           "preprint": false,
           "preprint_server": "",
           "vor_doi": "",
-          "retrieved": "2026-10-19T23:56:14Z",
+          "notice_type": "",
+          "notice_for": "",
+          "weak_retraction": false,
+          "licence": "",
+          "retrieved": "2026-10-20T12:55:55Z",
           "candidates": [
             {
               "source": "europepmc",
@@ -2828,14 +2989,17 @@
               "journal": "N Engl J Med",
               "retracted": false,
               "preprint": false,
-              "pmcid": ""
+              "pmcid": "",
+              "type": "",
+              "volume": "383",
+              "pages": "1838-1847"
             }
           ]
         },
         {
           "source": "pubmed",
           "query": "pmid:32865380",
-          "url": "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=pubmed&id=32865380&retmode=xml&tool=citecheck&email=REDACTED",
+          "url": "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=pubmed&id=32865380&retmode=xml&tool=citecheck",
           "ok": true,
           "found": true,
           "error": "",
@@ -2929,7 +3093,11 @@
           "preprint": false,
           "preprint_server": "",
           "vor_doi": "",
-          "retrieved": "2026-10-19T23:56:14Z",
+          "notice_type": "",
+          "notice_for": "",
+          "weak_retraction": false,
+          "licence": "",
+          "retrieved": "2026-10-20T12:55:55Z",
           "candidates": []
         }
       ]
