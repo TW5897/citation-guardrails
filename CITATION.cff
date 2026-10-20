@@ -1,0 +1,11 @@
+cff-version: 1.2.0
+message: "If you use citation-guardrails in your research workflow, please cite it as below."
+title: "citation-guardrails: verified-citation skills for clinicians and researchers"
+type: software
+authors:
+  - family-names: Warsi
+    given-names: Talal
+version: 0.1.0
+date-released: 2026-10-20
+license: MIT
+repository-code: "https://github.com/TW5897/citation-guardrails"

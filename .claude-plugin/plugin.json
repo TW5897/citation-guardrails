@@ -1,0 +1,13 @@
+{
+  "name": "citation-guardrails",
+  "version": "0.1.0",
+  "description": "A clinician's guardrails against fabricated citations: verify references against CrossRef, PubMed, OpenAlex and Europe PMC, check that cited papers say what your sentence says, and write with [VERIFY] markers so nothing unverified ships.",
+  "author": {
+    "name": "Talal Warsi",
+    "url": "https://github.com/TW5897"
+  },
+  "homepage": "https://github.com/TW5897/citation-guardrails",
+  "repository": "https://github.com/TW5897/citation-guardrails",
+  "license": "MIT",
+  "keywords": ["citations", "references", "hallucination", "pubmed", "crossref", "medical-research", "verification", "skills"]
+}

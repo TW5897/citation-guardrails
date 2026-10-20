@@ -1,0 +1,159 @@
+{
+  "manuscript": "examples\\manuscript-audit\\manuscript.md",
+  "generated": "2026-10-19T23:56:15Z",
+  "claims": [
+    {
+      "id": 1,
+      "sentence": "Low-dose colchicine reduced the composite of cardiovascular death, myocardial infarction, ischemic stroke or ischemia-driven revascularization by 31% in patients with chronic coronary disease [1].",
+      "cites": [
+        "1"
+      ],
+      "cite_style": "numeric",
+      "numbers": [
+        "31%",
+        "1"
+      ],
+      "direction_words": [
+        "reduced"
+      ],
+      "claim_type": "numeric",
+      "verdict": "",
+      "tier": "",
+      "source_evidence": "",
+      "severity": "",
+      "note": ""
+    },
+    {
+      "id": 2,
+      "sentence": "Colchicine also reduced all-cause mortality in this population [1].",
+      "cites": [
+        "1"
+      ],
+      "cite_style": "numeric",
+      "numbers": [
+        "1"
+      ],
+      "direction_words": [
+        "mortality",
+        "reduced"
+      ],
+      "claim_type": "numeric",
+      "verdict": "",
+      "tier": "",
+      "source_evidence": "",
+      "severity": "",
+      "note": ""
+    },
+    {
+      "id": 3,
+      "sentence": "After myocardial infarction, colchicine lowered the risk of ischemic cardiovascular events (HR 0.77, 95% CI 0.61-0.96) [2].",
+      "cites": [
+        "0",
+        "2",
+        "61",
+        "77"
+      ],
+      "cite_style": "numeric",
+      "numbers": [
+        "0.77",
+        "95%",
+        "0.61",
+        "0.96",
+        "2"
+      ],
+      "direction_words": [
+        "lowered",
+        "risk"
+      ],
+      "claim_type": "numeric",
+      "verdict": "",
+      "tier": "",
+      "source_evidence": "",
+      "severity": "",
+      "note": ""
+    },
+    {
+      "id": 4,
+      "sentence": "Endocardial fibroelastosis is associated with acute ischemic stroke in adults [3].",
+      "cites": [
+        "3"
+      ],
+      "cite_style": "numeric",
+      "numbers": [
+        "3"
+      ],
+      "direction_words": [
+        "associated"
+      ],
+      "claim_type": "numeric",
+      "verdict": "",
+      "tier": "",
+      "source_evidence": "",
+      "severity": "",
+      "note": ""
+    },
+    {
+      "id": 5,
+      "sentence": "Hydroxychloroquine was associated with increased in-hospital mortality in COVID-19 [4].",
+      "cites": [
+        "4"
+      ],
+      "cite_style": "numeric",
+      "numbers": [
+        "19",
+        "4"
+      ],
+      "direction_words": [
+        "associated",
+        "increased",
+        "mortality"
+      ],
+      "claim_type": "numeric",
+      "verdict": "",
+      "tier": "",
+      "source_evidence": "",
+      "severity": "",
+      "note": ""
+    },
+    {
+      "id": 6,
+      "sentence": "The benefit of colchicine was consistent across prior acute coronary syndrome status [7].",
+      "cites": [
+        "7"
+      ],
+      "cite_style": "numeric",
+      "numbers": [
+        "7"
+      ],
+      "direction_words": [
+        "benefit"
+      ],
+      "claim_type": "numeric",
+      "verdict": "",
+      "tier": "",
+      "source_evidence": "",
+      "severity": "",
+      "note": ""
+    },
+    {
+      "id": 7,
+      "sentence": "We followed PRISMA 2020 guidance [5, 6].",
+      "cites": [
+        "5",
+        "6"
+      ],
+      "cite_style": "numeric",
+      "numbers": [
+        "5",
+        "6"
+      ],
+      "direction_words": [],
+      "claim_type": "numeric",
+      "verdict": "",
+      "tier": "",
+      "source_evidence": "",
+      "severity": "",
+      "note": ""
+    }
+  ]
+}

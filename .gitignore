@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+.citecheck-cache.json
+qc/
+.DS_Store
+Thumbs.db
+*.log

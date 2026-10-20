@@ -1,0 +1,21 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "citation-guardrails",
+  "description": "Verified-citation skills for clinicians and researchers: check-references, check-claims, find-reference, cite-safely.",
+  "owner": {
+    "name": "Talal Warsi",
+    "url": "https://github.com/TW5897"
+  },
+  "plugins": [
+    {
+      "name": "citation-guardrails",
+      "description": "Verify references against CrossRef, PubMed, OpenAlex and Europe PMC; check claims against sources; write with [VERIFY] markers.",
+      "version": "0.1.0",
+      "source": "./",
+      "category": "productivity",
+      "homepage": "https://github.com/TW5897/citation-guardrails",
+      "license": "MIT",
+      "keywords": ["citations", "references", "pubmed", "crossref", "hallucination", "medical-research"]
+    }
+  ]
+}

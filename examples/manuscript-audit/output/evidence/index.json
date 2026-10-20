@@ -1,0 +1,85 @@
+{
+  "generated": "2026-10-19T23:56:15Z",
+  "source": "examples\\manuscript-audit\\output\\reference_audit.json",
+  "packs": [
+    {
+      "ref_id": "ref_1",
+      "status": "VERIFIED",
+      "tier": "abstract",
+      "file": "examples\\manuscript-audit\\output\\evidence\\ref_1.md",
+      "pmid": "32865380",
+      "doi": "10.1056/nejmoa2021372",
+      "pmcid": "",
+      "retracted": false,
+      "preprint": false,
+      "chars": 2407
+    },
+    {
+      "ref_id": "ref_2",
+      "status": "VERIFIED",
+      "tier": "abstract",
+      "file": "examples\\manuscript-audit\\output\\evidence\\ref_2.md",
+      "pmid": "31733140",
+      "doi": "10.1056/nejmoa1912388",
+      "pmcid": "",
+      "retracted": false,
+      "preprint": false,
+      "chars": 2088
+    },
+    {
+      "ref_id": "ref_3",
+      "status": "VERIFIED",
+      "tier": "abstract",
+      "file": "examples\\manuscript-audit\\output\\evidence\\ref_3.md",
+      "pmid": "39034931",
+      "doi": "10.1097/nrl.0000000000000576",
+      "pmcid": "",
+      "retracted": false,
+      "preprint": false,
+      "chars": 1717
+    },
+    {
+      "ref_id": "ref_4",
+      "status": "RETRACTED",
+      "tier": "abstract",
+      "file": "examples\\manuscript-audit\\output\\evidence\\ref_4.md",
+      "pmid": "32450107",
+      "doi": "10.1016/s0140-6736(20)31180-6",
+      "pmcid": "PMC7255293",
+      "retracted": true,
+      "preprint": false,
+      "chars": 3346
+    },
+    {
+      "ref_id": "ref_5",
+      "status": "VERIFIED",
+      "tier": "abstract",
+      "file": "examples\\manuscript-audit\\output\\evidence\\ref_5.md",
+      "pmid": "33782057",
+      "doi": "10.1136/bmj.n71",
+      "pmcid": "PMC8005924",
+      "retracted": false,
+      "preprint": false,
+      "chars": 877
+    },
+    {
+      "ref_id": "ref_6",
+      "status": "NOT_FOUND",
+      "tier": "none",
+      "file": null,
+      "note": "reference not resolved; nothing to fetch"
+    },
+    {
+      "ref_id": "ref_7",
+      "status": "MISMATCH",
+      "tier": "abstract",
+      "file": "examples\\manuscript-audit\\output\\evidence\\ref_7.md",
+      "pmid": "32865380",
+      "doi": "10.1056/nejmoa2021372",
+      "pmcid": "",
+      "retracted": false,
+      "preprint": false,
+      "chars": 2407
+    }
+  ]
+}

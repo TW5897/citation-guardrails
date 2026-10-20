@@ -1,0 +1,7 @@
+References
+
+Nidorf, S. M., Fiolet, A. T. L., Mosterd, A., Eikelboom, J. W., Schut, A., Opstal, T. S. J., ... Thompson, P. L. (2020). Colchicine in patients with chronic coronary disease. New England Journal of Medicine, 383(19), 1838-1847. https://doi.org/10.1056/NEJMoa2021372
+
+Tardif, J.-C., Kouz, S., Waters, D. D., Bertrand, O. F., Diaz, R., Maggioni, A. P., & Roubille, F. (2019). Efficacy and safety of low-dose colchicine after myocardial infarction. New England Journal of Medicine, 381(26), 2497-2505.
+
+Fabricated, A., & Invented, B. (2022). Machine learning prediction of heart failure readmission from wearable sensors: The WEARABLE-HF cohort. Journal of Imaginary Cardiology, 12(3), 45-56. https://doi.org/10.9999/fake.2022.001

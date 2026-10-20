@@ -1,0 +1,14 @@
+Manuscript title: Example
+
+Introduction text that is not a reference.
+
+References
+
+1. Nidorf SM, Fiolet ATL, Mosterd A, Eikelboom JW, Schut A, Opstal TSJ, et al. Colchicine in Patients with Chronic Coronary Disease. N Engl J Med. 2020;383(19):1838-1847. doi:10.1056/NEJMoa2021372
+2. Warsi T, Ramphul K, Dulay MS, Jeelani S, Verma R, Kumar N, et al. Risk Factors of Acute Ischemic Stroke and Mortality Among Adults With Endocardial Fibroelastosis. Neurologist. 2024;29(6):317-322. PMID: 39034931
+3. Ebrahimi S, Khan A, Patel R. Colchicine in Patients with Chronic Coronary Disease. N Engl J Med. 2020;383(19):1838-1847. doi:10.1056/NEJMoa2021372
+4. Smith J, Jones A. Intravenous Turmeric and 30-Day Mortality in Cardiogenic Shock: The TURMERIC-SHOCK Randomized Trial. Lancet. 2023;401(10380):1120-1130.
+5. Mehra MR, Desai SS, Ruschitzka F, Patel AN. Hydroxychloroquine or chloroquine with or without a macrolide for treatment of COVID-19: a multinational registry analysis. Lancet. 2020. doi:10.1016/S0140-6736(20)31180-6
+6. Tardif JC, Kouz S, Waters DD, Bertrand OF, Diaz R, Maggioni AP, et al. Efficacy and Safety of Low-Dose Colchicine after Myocardial Infarction. N Engl J Med. 2019;381(26):2497-2505. doi:10.1056/NEJMoa1912388
+7. van der Meer P, Gaggin HK, Dec GW. ACC/AHA Versus ESC Guidelines on Heart Failure: JACC Guideline Comparison. J Am Coll Cardiol. 2019;73(21):2756-2768.
+8. McMurray JJV, Packer M, Desai AS, Gong J, Lefkowitz MP, Rizkala AR, et al. Angiotensin-neprilysin inhibition versus enalapril in heart failure. N Engl J Med. 2014;371(11):993-1004. doi:10.1056/NEJMoa1409077 PMID: 25176015
